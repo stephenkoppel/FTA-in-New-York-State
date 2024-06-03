@@ -1,0 +1,393 @@
+---
+title: "alt specification"
+author: "Stephen Koppel"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Statewide analysis
+
+
+```{r}
+#heirarchical 1
+
+mod_step_state1 <- glm(formula = FTA ~ sev_cat + charge_cat + DV , data = model_data_statewide, family = binomial(link = "logit"))
+
+
+vif(mod_step_state1)
+
+psuedo_state1 <- pR2(mod_step_state1)
+# mcfadden's = .8
+
+ame_state1 <- margins(mod_step_state1)
+
+results_state1 <- data.frame(unclass(summary(ame_state1)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "1") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+#heirarchical 2
+
+mod_step_state2 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision, data = model_data_statewide, family = binomial(link = "logit"))
+
+
+vif(mod_step_state2)
+
+psuedo_state2 <- pR2(mod_step_state2)
+# mcfadden's = .14
+
+ame_state2 <- margins(mod_step_state2)
+
+results_state2 <- data.frame(unclass(summary(ame_state2)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "2") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+#heirarchical 3
+
+mod_step_state3 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat, data = model_data_statewide, family = binomial(link = "logit"))
+
+
+vif(mod_step_state3)
+
+psuedo_state3 <- pR2(mod_step_state3)
+# mcfadden's = .14
+
+ame_state3 <- margins(mod_step_state3)
+
+results_state3 <- data.frame(unclass(summary(ame_state3)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "3") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+#heirarchical 4
+
+mod_step_state4 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision + region, data = model_data_statewide, family = binomial(link = "logit"))
+
+
+vif(mod_step_state4)
+
+psuedo_state4 <- pR2(mod_step_state4)
+# mcfadden's = .15
+
+ame_state4 <- margins(mod_step_state4)
+
+results_state4 <- data.frame(unclass(summary(ame_state4)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "4") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+#heirarchical 5
+
+mod_step_state5 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision + app_released_cat + region, data = model_data_statewide, family = binomial(link = "logit"))
+
+
+vif(mod_step_state5)
+
+psuedo_state5 <- pR2(mod_step_state5)
+# mcfadden's = .15
+
+ame_state5 <- margins(mod_step_state5)
+
+results_state5 <- data.frame(unclass(summary(ame_state5)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "5") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+step_state <- bind_rows(results_state1, results_state2, results_state3, results_state4, results_state5) %>% 
+   pivot_wider(names_from = step, values_from = c(AME, p)) %>% 
+  select(factor, AME_1, p_1, `AME_2`, `p_2`, AME_3, p_3, AME_4, p_4, AME_5, p_5) %>% 
+  mutate_at(vars(p_1, p_2, p_3, p_4, p_5), ~case_when(
+    . < 0.001 ~ "***",
+    . < 0.01 ~ "**",
+    . < 0.05 ~ "*",
+    TRUE ~ ''
+  ))
+
+setwd("C:/R Projects/OCA_fta")
+step_state %>% 
+   write.csv(., file = "step_state.csv")
+
+```
+
+
+## NYC
+
+
+```{r}
+
+model_data_step_nyc <- model_data_statewide %>% filter(region == "NYC")
+
+#heirarchical 1
+
+mod_step_nyc1 <- glm(formula = FTA ~ sev_cat + charge_cat + DV , data = model_data_step_nyc, family = binomial(link = "logit"))
+
+
+vif(mod_step_nyc1)
+
+psuedo_nyc1 <- pR2(mod_step_nyc1)
+# mcfadden's = .10
+
+ame_nyc1 <- margins(mod_step_nyc1)
+
+results_nyc1 <- data.frame(unclass(summary(ame_nyc1)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "1") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+#heirarchical 2
+
+mod_step_nyc2 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision, data = model_data_step_nyc, family = binomial(link = "logit"))
+
+
+vif(mod_step_nyc2)
+
+psuedo_nyc2 <- pR2(mod_step_nyc2)
+# mcfadden's = .16
+
+ame_nyc2 <- margins(mod_step_nyc2)
+
+results_nyc2 <- data.frame(unclass(summary(ame_nyc2)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "2") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+#heirarchical 3
+
+mod_step_nyc3 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat, data = model_data_step_nyc, family = binomial(link = "logit"))
+
+
+vif(mod_step_nyc3)
+
+psuedo_nyc3 <- pR2(mod_step_nyc3)
+# mcfadden's = .16
+
+ame_nyc3 <- margins(mod_step_nyc3)
+
+results_nyc3 <- data.frame(unclass(summary(ame_nyc3)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "3") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+#heirarchical 4
+
+mod_step_nyc4 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision, data = model_data_step_nyc, family = binomial(link = "logit"))
+
+
+vif(mod_step_nyc4)
+
+psuedo_nyc4 <- pR2(mod_step_nyc4)
+# mcfadden's = .17
+
+ame_nyc4 <- margins(mod_step_nyc4)
+
+results_nyc4 <- data.frame(unclass(summary(ame_nyc4)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "4") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+#heirarchical 5
+
+mod_step_nyc5 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision + app_released_cat, data = model_data_step_nyc, family = binomial(link = "logit"))
+
+
+vif(mod_step_nyc5)
+
+psuedo_nyc5 <- pR2(mod_step_nyc5)
+# mcfadden's = .17
+
+ame_nyc5 <- margins(mod_step_nyc5)
+
+results_nyc5 <- data.frame(unclass(summary(ame_nyc5)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "5") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+step_nyc <- bind_rows(results_nyc1, results_nyc2, results_nyc3, results_nyc4, results_nyc5) %>% 
+   pivot_wider(names_from = step, values_from = c(AME, p)) %>% 
+  select(factor, AME_1, p_1, `AME_2`, `p_2`, AME_3, p_3, AME_4, p_4, AME_5, p_5) %>% 
+  mutate_at(vars(p_1, p_2, p_3, p_4, p_5), ~case_when(
+    . < 0.001 ~ "***",
+    . < 0.01 ~ "**",
+    . < 0.05 ~ "*",
+    TRUE ~ ''
+  ))
+
+
+setwd("C:/R Projects/OCA_fta")
+step_nyc %>% 
+   write.csv(., file = "step_nyc.csv")
+
+```
+
+
+## NYC Suburb
+
+
+```{r}
+
+model_data_step_sub <- model_data_statewide %>% filter(region == "NYC Suburb")
+
+#heirarchical 1
+
+mod_step_sub1 <- glm(formula = FTA ~ sev_cat + charge_cat + DV , data = model_data_step_sub, family = binomial(link = "logit"))
+
+
+vif(mod_step_sub1)
+
+psuedo_sub1 <- pR2(mod_step_sub1)
+# mcfadden's = .07
+
+ame_sub1 <- margins(mod_step_sub1)
+
+results_sub1 <- data.frame(unclass(summary(ame_sub1)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "1") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+#heirarchical 2
+
+mod_step_sub2 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision, data = model_data_step_sub, family = binomial(link = "logit"))
+
+
+vif(mod_step_sub2)
+
+psuedo_sub2 <- pR2(mod_step_sub2)
+# mcfadden's = .13
+
+ame_sub2 <- margins(mod_step_sub2)
+
+results_sub2 <- data.frame(unclass(summary(ame_sub2)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "2") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+#heirarchical 3
+
+mod_step_sub3 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat, data = model_data_step_sub, family = binomial(link = "logit"))
+
+
+vif(mod_step_sub3)
+
+psuedo_sub3 <- pR2(mod_step_sub3)
+# mcfadden's = .14
+
+ame_sub3 <- margins(mod_step_sub3)
+
+results_sub3 <- data.frame(unclass(summary(ame_sub3)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "3") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+#heirarchical 4
+
+mod_step_sub4 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision, data = model_data_step_sub, family = binomial(link = "logit"))
+
+
+vif(mod_step_sub4)
+
+psuedo_sub4 <- pR2(mod_step_sub4)
+# mcfadden's = .15
+
+ame_sub4 <- margins(mod_step_sub4)
+
+results_sub4 <- data.frame(unclass(summary(ame_sub4)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "4") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+#heirarchical 5
+
+mod_step_sub5 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision + app_released_cat, data = model_data_step_sub, family = binomial(link = "logit"))
+
+
+vif(mod_step_sub5)
+
+psuedo_sub5 <- pR2(mod_step_sub5)
+# mcfadden's = .15
+
+ame_sub5 <- margins(mod_step_sub5)
+
+results_sub5 <- data.frame(unclass(summary(ame_sub5)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "5") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+step_sub <- bind_rows(results_sub1, results_sub2, results_sub3, results_sub4, results_sub5) %>% 
+   pivot_wider(names_from = step, values_from = c(AME, p)) %>% 
+  select(factor, AME_1, p_1, `AME_2`, `p_2`, AME_3, p_3, AME_4, p_4, AME_5, p_5) %>% 
+  mutate_at(vars(p_1, p_2, p_3, p_4, p_5), ~case_when(
+    . < 0.001 ~ "***",
+    . < 0.01 ~ "**",
+    . < 0.05 ~ "*",
+    TRUE ~ ''
+  ))
+
+setwd("C:/R Projects/OCA_fta")
+step_sub %>% 
+   write.csv(., file = "step_sub.csv")
+
+```
+
+## Upstate
+
+
+```{r}
+
+model_data_step_upstate <- model_data_statewide %>% filter(region == "Upstate")
+
+#heirarchical 1
+
+mod_step_upstate1 <- glm(formula = FTA ~ sev_cat + charge_cat + DV , data = model_data_step_upstate, family = binomial(link = "logit"))
+
+
+vif(mod_step_upstate1)
+
+psuedo_upstate1 <- pR2(mod_step_upstate1)
+# mcfadden's = .06
+
+ame_upstate1 <- margins(mod_step_upstate1)
+
+results_upstate1 <- data.frame(unclass(summary(ame_upstate1)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "1") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+#heirarchical 2
+
+mod_step_upstate2 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision, data = model_data_step_upstate, family = binomial(link = "logit"))
+
+
+vif(mod_step_upstate2)
+
+psuedo_upstate2 <- pR2(mod_step_upstate2)
+# mcfadden's = .09
+
+ame_upstate2 <- margins(mod_step_upstate2)
+
+results_upstate2 <- data.frame(unclass(summary(ame_upstate2)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "2") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+#heirarchical 3
+
+mod_step_upstate3 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat, data = model_data_step_upstate, family = binomial(link = "logit"))
+
+
+vif(mod_step_upstate3)
+
+psuedo_upstate3 <- pR2(mod_step_upstate3)
+# mcfadden's = .10
+
+ame_upstate3 <- margins(mod_step_upstate3)
+
+results_upstate3 <- data.frame(unclass(summary(ame_upstate3)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "3") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+#heirarchical 4
+
+mod_step_upstate4 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision, data = model_data_step_upstate, family = binomial(link = "logit"))
+
+
+vif(mod_step_upstate4)
+
+psuedo_upstate4 <- pR2(mod_step_upstate4)
+# mcfadden's = .10
+
+ame_upstate4 <- margins(mod_step_upstate4)
+
+results_upstate4 <- data.frame(unclass(summary(ame_upstate4)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "4") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+#heirarchical 5
+
+mod_step_upstate5 <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision + app_released_cat, data = model_data_step_upstate, family = binomial(link = "logit"))
+
+
+vif(mod_step_upstate5)
+
+psuedo_upstate5 <- pR2(mod_step_upstate5)
+# mcfadden's = .19
+
+ame_upstate5 <- margins(mod_step_upstate5)
+
+results_upstate5 <- data.frame(unclass(summary(ame_upstate5)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(step = "5") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+step_upstate <- bind_rows(results_upstate1, results_upstate2, results_upstate3, results_upstate4, results_upstate5) %>% 
+   pivot_wider(names_from = step, values_from = c(AME, p)) %>% 
+  select(factor, AME_1, p_1, `AME_2`, `p_2`, AME_3, p_3, AME_4, p_4, AME_5, p_5) %>% 
+  mutate_at(vars(p_1, p_2, p_3, p_4, p_5), ~case_when(
+    . < 0.001 ~ "***",
+    . < 0.01 ~ "**",
+    . < 0.05 ~ "*",
+    TRUE ~ ''
+  ))
+
+setwd("C:/R Projects/OCA_fta")
+step_upstate %>% 
+   write.csv(., file = "step_upstate.csv")
+
+```
