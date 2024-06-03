@@ -1,0 +1,1571 @@
+---
+title: "section 4"
+author: "Stephen Koppel"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Section 4
+
+```{r}
+
+# back to FTA analysis with raw data, which will require several further exclusion, starting with the removal of IDVs and FYCs transferred to Family Court
+
+# drop out disposed cases
+
+FTA <- FTA %>% # refer back to section 3 for FTA object
+  filter(release_decision != "Disposed at arraign")
+
+
+# drop upper court IDV bc no appearance counts
+
+FTA <- FTA %>% filter(case_type != "IDV - Criminal")
+
+
+# drop FYC transfers bc can't track FTA in family court
+
+FTA <- FTA %>% mutate(fyc_transfer = ifelse(case_type == "Felony Youth Complaint" & disposition_detail %in% c("Removal to Family Court", "Removal to Family Court - Probation Intake"), "TRUE", "FALSE")) %>% filter(fyc_transfer != "TRUE")
+
+# create pseudo ID that accounts for cases with NULL arrest event ID due to lack of criminal history info from DCJS
+
+FTA <- FTA %>% mutate(case_id = ifelse(arrest_event_id  == "NULL", row_number(), arrest_event_id)) 
+
+FTA <- FTA %>% select(-arrest_event_id) %>% rename(arrest_event_id = case_id)
+
+
+# flag FTA across dockets within a case
+
+FTA  <- FTA %>% 
+  group_by(arrest_event_id) %>% 
+  mutate(case_FTA = max(FTA)) %>% 
+  ungroup()
+
+
+
+FTA <- FTA %>% select(-FTA) %>% rename(FTA = case_FTA)
+
+
+# flag earliest arraignment date
+
+FTA <- FTA %>% group_by(arrest_event_id) %>% 
+  mutate(earliest_arraign = min(arraign_date)) %>% 
+  ungroup()
+
+
+# flag most severe across earliest arraign
+
+FTA <- FTA %>% mutate(sev_cat = case_when(severity == "Misdemeanor" ~ 1,
+                         severity == "Felony" & vfo != "Y" ~ 2,
+                         vfo == "Y" ~ 3)) 
+
+
+FTA <- FTA %>% group_by(arrest_event_id, arraign_date) %>% 
+  mutate(most_severe = max(sev_cat)) %>% 
+  ungroup()
+
+
+# categorize lower court and upper court dockets
+
+FTA <- FTA %>%  mutate(court_level = case_when(case_type %in% c("Docket", "Felony Youth Complaint") ~ "Lower",
+                                         case_type %in% c("Indictment", "Superior Court Information", "Superior Criminal") ~ "Upper")) 
+
+
+
+# take lower court max and upper court max and add them
+
+FTA <- FTA %>% 
+  group_by(arrest_event_id) %>% 
+  mutate(
+    max_appearance_lower = max(app_count_released[court_level == "Lower"], na.rm = TRUE),
+    max_appearance_lower = ifelse(is.infinite(max_appearance_lower) | is.nan(max_appearance_lower), NA, max_appearance_lower)
+  ) %>% 
+    mutate(
+    max_appearance_upper = max(app_count_released[court_level == "Upper"], na.rm = TRUE),
+    max_appearance_upper = ifelse(is.infinite(max_appearance_upper) | is.nan(max_appearance_upper), NA, max_appearance_upper)
+  ) %>% ungroup()
+
+
+FTA <- FTA %>% mutate(total_app_released =  rowSums(select(., c("max_appearance_lower", "max_appearance_upper")), na.rm = TRUE)) 
+
+
+# flag most restrictive release decision
+
+FTA <- FTA %>% mutate(release_cat = case_when(release_decision == "Unknown" ~ 1,
+                                                              release_decision == "ROR" ~ 2,
+                         release_decision == "Nonmonetary release" ~ 3,
+                         release_decision == "Bail-set" ~ 4,
+                         release_decision == "Remanded" ~ 5)) 
+
+
+FTA <- FTA %>% group_by(arrest_event_id, arraign_date) %>% 
+  mutate(most_severe = max(sev_cat),
+         arraign_outcome = max(release_cat)) %>% 
+  ungroup()
+
+
+
+
+# take the first of the most severe charge/worst release outcome
+
+FTA <- FTA %>% 
+  group_by(arrest_event_id) %>%   
+  arrange(arrest_event_id, arraign_date, sev_cat) %>%
+  filter(arraign_date == earliest_arraign, sev_cat == most_severe) %>% 
+  slice_head() %>% 
+  ungroup()
+
+
+# recode sev cat back 
+
+FTA <- FTA %>% mutate(sev_cat = case_when(severity == "Misdemeanor" ~ "Misdemeanor",
+                         severity == "Felony" & vfo != "Y" ~ "Nonviolent Felony",
+                         vfo == "Y" ~ "Violent Felony")) 
+
+# recode release cat back 
+
+FTA <- FTA %>% mutate(arraign_outcome = case_when(release_cat == 1 ~ "Unknown",
+                                                release_cat == 2 ~ "ROR",
+                         release_cat == 3 ~ "Nonmonetary release",
+                         release_cat == 4 ~ "Bail-set",
+                         release_cat == 5 ~ "Remanded")) 
+
+
+
+# restrict to true release outcomes (excludes unknown, dollar bail, and disposed at arraignment)
+
+FTA <- FTA %>%  filter(arraign_outcome != "Unknown") %>% 
+  filter(dollar_bail %in% c("FALSE", NA)) %>% 
+  filter(arraign_date>= "2022-01-01" & arraign_date <= "2022-12-01")
+
+
+```
+
+
+# recode predictors
+
+
+```{r}
+
+# flag any pending
+
+FTA <- FTA %>% mutate(any_pending = ifelse(pend_misd == 1|pend_nvf == 1|pend_vfo ==1, "Yes","No"))
+
+
+
+# create prior misdemeanor cats
+
+FTA <- FTA %>% mutate(misd_cat = case_when(count_prior_misd == 0 ~ "0",
+                                    count_prior_misd == 1 ~ "1",
+                                    count_prior_misd %in% c(2,3,4) ~ "2 to 4",
+                                    count_prior_misd %in% c(5,6,7,8,9,10) ~ "5+")) 
+
+
+
+# prior nvf
+
+FTA <- FTA %>% mutate(nvf_cat = case_when(count_prior_nvf == 0 ~ "0",
+                                    count_prior_nvf == 1 ~ "1",
+                                    count_prior_nvf %in% c(2,3,4) ~ "2+"))
+
+
+
+# prior vfo
+
+FTA <- FTA %>% mutate(vfo_cat = case_when(count_prior_vfo == 0 ~ "0",
+                                    count_prior_vfo == 1 ~ "1",
+                                    count_prior_vfo == 2 ~ "2+")) 
+
+
+# race
+
+
+FTA <- FTA %>% mutate(race_ethnicity = case_when(ethnicity == "Hispanic" ~ "Hispanic",
+                                          race == "Black" ~ "Black",
+                                          race == "White" ~ "White",
+                                          TRUE ~ "Additional Groups")) 
+
+
+
+# age cat
+
+FTA <- FTA %>% 
+  filter(age_at_arrest != 0) %>% 
+  mutate(age_cat = case_when (age_at_arrest < 25 ~ "<25",
+                              age_at_arrest >= 25 & age_at_arrest < 55 ~ "25-54",
+                              age_at_arrest > 54 ~ "55+"))
+
+
+
+# probation or parole
+
+FTA <- FTA %>% mutate(supervision = case_when(supervision == "1" ~ "Yes",
+                                     supervision == "0" ~ "No"))
+
+
+# DV/family offense
+
+FTA <- FTA %>% mutate(DV = case_when(order_of_protection == "Family Offense" ~ "Yes",
+                                     is.na(order_of_protection) ~ "No",
+                                     TRUE ~ "No"))
+
+
+# recode sev cat back 
+
+FTA <- FTA %>% mutate(sev_cat = case_when(severity == "Misdemeanor" ~ "Misdemeanor",
+                         severity == "Felony" & vfo != "Y" ~ "Nonviolent Felony",
+                         vfo == "Y" ~ "Violent Felony")) 
+
+
+
+# offense type
+
+FTA <- FTA %>% 
+  mutate(charge_cat = case_when(str_detect(charge, "120") & severity == "Felony" ~ "Felony assault",
+                                str_detect(charge, "120") & severity == "Misdemeanor" ~ "Misd assault",
+                                charge == "155.25" ~ "Petit larceny",
+                                str_detect(charge, "155") & severity == "Felony" ~ "Grand larceny",
+                                charge == "1192" ~ "DWI",
+                                str_detect(charge, "220") & severity == "Misdemeanor" ~ "Misd drug",
+                                str_detect(charge, "220") & severity == "Felony" ~ "Felony drug",
+                                str_detect(charge, "265") & severity == "Felony" ~ "Felony weapon",
+                                str_detect(charge, "145") ~ "Criminal mischief",
+                                charge %in% c("215.5", "215.51", "215.52") ~ "Criminal contempt",
+                                charge %in% c("140.2", "140.25", "140.3") ~ "Burglary",
+                                charge %in% c("160.05", "160.1", "160.15") ~ "Robbery")) %>% 
+           mutate(charge_cat = case_when(!is.na(charge_cat) ~ charge_cat,
+                                         !is.na(charge) ~ "Other")) 
+
+# recode several errors where petit larceny is classified as a nonviolent felony
+
+FTA <- FTA %>% mutate(sev_cat = case_when(charge_cat == "Petit larceny" & sev_cat == "Nonviolent Felony" ~ "Misdemeanor",
+                                   TRUE ~ sev_cat))
+
+
+
+# DAT
+
+FTA <- FTA %>% mutate(DAT = ifelse(arrest_type == "DAT", "Yes","No"))
+
+
+
+# appearance count cat
+
+FTA <- FTA %>%
+  mutate(total_app_released = total_app_released -1) %>% # subtract 1 to remove arraignment appearance
+  mutate(app_released_cat = case_when (total_app_released == 1 ~ "1",
+                                 total_app_released  == 2  ~ "2",
+                                 total_app_released == 3 ~ "3",
+                                 total_app_released  == 4 ~ "4",
+                              total_app_released  == 5 ~ "5",
+                              total_app_released  == 6 ~ "6",
+                              total_app_released  == 7 ~ "7",
+                              total_app_released == 8 ~ "8",
+                              total_app_released  == 9 ~ "9",
+                              total_app_released >= 10  ~ "10+")) 
+
+
+```
+
+
+
+```{r}
+
+# create analytic dataset for released cases in 2022 with at least one appearance while on release
+
+FTA_released <- FTA %>% filter(arraign_outcome %in% c("ROR", "Nonmonetary release")) %>% 
+  filter(arraign_date>= "2022-01-01" & arraign_date <= "2022-12-01") %>% 
+  filter(total_app_released > 0) 
+
+```
+
+
+**Region**
+
+```{r}
+
+
+state_FTA <- FTA_released %>% 
+  group_by(FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  mutate(region = "Statewide", .before = FTA)
+
+FTA_released %>% 
+  group_by(region, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  bind_rows(state_FTA) %>% 
+  filter(FTA == 1) %>% 
+  select(region, fta_rate) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "Statewide", "Upstate", "NYC Suburb", "NYC")) %>% 
+  ggplot(aes(x= region, 
+             y = fta_rate)) +
+  geom_chicklet(stat = "identity", fill = "#3b4982", width = .8*3/4) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x =region, 
+                y = fta_rate),
+            hjust = 1.25, 
+            color = "white",
+            size = 4, family = "Knockout") +
+  coord_flip() + 
+  theme_bw() +
+  theme(plot.margin = ggplot2::margin(20, 20, 5, 20, "pt"),
+        axis.text.y = element_text(size = 10, family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = ggplot2::margin(r = 5, unit = "pt")),
+        plot.background = element_rect(fill = "white"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  scale_x_discrete(expand=c(.2,.1)) +
+  labs(x = '', y = '') +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  expand_limits(y =.22)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("byregion_4.1.tiff", width = 5.75, height = 3.25)
+
+```
+
+**county**
+
+
+```{r}
+
+
+FTA_released %>% 
+  filter(region == "NYC") %>% 
+  mutate(county = case_when(county == "Richmond" ~ "Staten Island",
+                                  county == "Kings" ~ "Brooklyn",
+                            county == "New York" ~ "Manhattan",
+                            TRUE ~ county)) %>% 
+  group_by(county, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(county, fta_rate) %>% 
+  ggplot(aes(x= reorder(county,-fta_rate), 
+             y = fta_rate)) +
+  geom_chicklet(stat = "identity", fill = "#3b4982", width = .80) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = reorder(county,fta_rate), 
+                y = fta_rate),
+            hjust = 1.25, 
+            color = "white",
+            size = 4) +
+  coord_flip() + 
+  theme_bw() +
+  theme(plot.margin = margin(20, 20, 5, 20, "pt"),
+        axis.text.y = element_text(size = 10, family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.background = element_rect(fill = "white"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  scale_x_discrete(expand=c(.2,.1)) +
+  labs(x = '', y = '') +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  expand_limits(y =.27)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("NYCborough_4.2.tiff", width = 5.75, height = 3.25)
+
+```
+
+```{r}
+
+FTA_released %>% 
+  filter(region == "NYC Suburb") %>% 
+  group_by(county, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>%
+  filter(FTA == "1") %>% 
+  select(county, fta_rate) %>% 
+  ggplot(aes(x= reorder(county,-fta_rate), 
+             y = fta_rate)) +
+  geom_chicklet(stat = "identity", fill = "#3b4982", width = .8, position = position_nudge(x = 0)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = reorder(county,fta_rate), 
+                y = fta_rate),
+            hjust = 1.25, 
+            color = "white",
+            size = 4) +
+  coord_flip() + 
+  theme_bw () +
+  theme(plot.margin = margin(20, 20, 5, 20, "pt"),
+        axis.text.y = element_text(size = 10, 
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.background = element_rect(fill = "white"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  scale_x_discrete(expand=c(.2,.1)) +
+  labs(x = '', y = '') +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  expand_limits(y = .22)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("suburb_4.3.tiff", width = 5.75, height = 3.25)
+
+```
+
+
+```{r}
+
+county_100 <- FTA_released %>% 
+  filter(region == "Upstate") %>% 
+  group_by(county) %>% 
+  summarise(n = n()) %>% 
+  filter(n > 100) %>% 
+  pull(county)
+  
+FTA_released %>% 
+  filter(region == "Upstate") %>% 
+  filter(county %in% county_100) %>% 
+  group_by(county, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  # mutate(FTA=  ifelse(county %in% c("Hamilton","Putnam","Schoharie","Yates"), "1", FTA)) %>%
+  # mutate(fta_rate =  ifelse(county %in% c("Hamilton","Putnam","Schoharie","Yates"), .00001, fta_rate)) %>%
+  filter(FTA == "1") %>% 
+  select(county, fta_rate) %>% 
+  ggplot(aes(x= reorder(county,-fta_rate), 
+             y = fta_rate)) +
+  geom_chicklet(stat = "identity", fill = "#3b4982", width = .6, position = position_dodge(width = 0.05)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = reorder(county,fta_rate), 
+                y = fta_rate),
+            hjust = -.1, 
+            size = 2.3) +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 6.5, 
+                                   family = "Knockout",
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 5, 20, "pt"),
+        plot.background = element_rect(fill = "white"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank()) +
+  scale_y_continuous(expand=c(0,0), labels = NULL)+
+  scale_x_discrete(expand = c(0.02,0)) +
+  expand_limits(y = .32) +
+  labs(x = '', y = '') +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) 
+ 
+setwd("C:/R Projects/OCA_fta")
+ggsave("100_upsate_4.4.tiff", width = 7, height = 9)
+
+
+
+```
+
+**severity category**
+
+```{r}
+
+
+state_sev <- FTA_released %>% 
+  filter(sev_cat != "NA") %>% 
+  mutate(sev_cat = fct_rev(sev_cat)) %>% 
+  group_by(sev_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  mutate(region = "Statewide")
+
+FTA_released %>% 
+  filter(sev_cat != "NA") %>% 
+  mutate(sev_cat = fct_rev(sev_cat)) %>% 
+  group_by(region, sev_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  bind_rows(state_sev) %>% 
+  filter(FTA == "1") %>% 
+  select(region, sev_cat, fta_rate) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>% 
+  ggplot(aes(x= fct_relevel(sev_cat, "Violent Felony","Nonviolent Felony", "Misdemeanor"),
+             y = fta_rate,
+             fill = region)) +
+  geom_chicklet(stat = "identity", width = .8*3/4, position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = sev_cat, 
+                y = fta_rate),
+            hjust = 1.1, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .25)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("severity_4.5.tiff", width = 7, height = 4)
+
+
+```
+
+
+```{r}
+
+
+state_charge <- FTA_released %>% 
+  filter(!is.na(charge_cat)) %>% 
+  group_by(charge_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>%
+  select(charge_cat, fta_rate) %>% 
+  mutate(region = "Statewide", .before = charge_cat)
+
+FTA_charge <- FTA_released %>% 
+  filter(!is.na(charge_cat)) %>% 
+  group_by(region, charge_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>%
+  bind_rows(state_charge) %>% 
+  select(region, charge_cat,fta_rate) %>% 
+  mutate(charge_cat = reorder_within(charge_cat, fta_rate, region)) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) 
+
+# reorder(charge_cat,fta_rate)
+  
+  
+  ggplot(data = FTA_charge, 
+         aes(x= reorder(charge_cat, fta_rate),
+             y = fta_rate,
+             fill = region)) +
+  geom_chicklet(stat = "identity", width = .8, position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = charge_cat, 
+                y = fta_rate),
+            hjust = ifelse(FTA_charge$fta_rate > .43, 1.1, -.1), 
+            color = ifelse(FTA_charge$fta_rate > .43, "white", "black"),
+            size = 2.5,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 7,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, scales = "free_y", nrow = 2) +
+  scale_x_reordered()+
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .48)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("charge_cat_4.6.tiff", width = 7, height = 4)
+
+
+```
+
+**DV order of protection**
+
+```{r}
+
+state_dv <- FTA_released %>% 
+  filter(DV!= "NULL") %>% 
+  group_by(DV, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(DV, fta_rate) %>% 
+  mutate(DV = as.factor(DV)) %>% 
+  mutate(region = "Statewide")
+
+FTA_released %>% 
+  filter(DV!= "NULL") %>% 
+  group_by(region, DV, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(region, DV, fta_rate) %>% 
+  mutate(DV = as.factor(DV)) %>% 
+  bind_rows(state_dv) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>%
+  ggplot(aes(x =fct_relevel(DV, "1", "0"),
+             y = fta_rate,
+             fill = region))+
+  geom_chicklet(stat = "identity", width = .95*2/4, position = position_dodge(width = 0.15)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = DV, 
+                y = fta_rate),
+            hjust = 1.2, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow =1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .25)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("dv_4.7.tiff", width = 7, height = 4)
+
+```
+
+
+```{r}
+
+# footnote for subset of DV
+
+FTA_released %>% 
+  mutate(DV_contempt = ifelse(raw_charge == "PL 215.50 03 AM Crim Contempt-2nd:Disobey Crt" & DV == "Yes", "Yes", "No")) %>% 
+  group_by(DV_contempt, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(DV_contempt, fta_rate) %>% 
+  mutate(DV_contempt = as.factor(DV_contempt)) %>% 
+  mutate(region = "Statewide")
+
+# 12% statewide (n = 3,834)
+
+FTA_released %>% 
+  mutate(DV_contempt = ifelse(raw_charge == "PL 215.50 03 AM Crim Contempt-2nd:Disobey Crt" & DV == "Yes", "Yes", "No")) %>%
+  group_by(region, DV_contempt, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) 
+
+# 12% NYC, 13% suburb, 11% upstate
+
+
+```
+
+
+**Any pending**
+
+```{r}
+
+
+state_pend <- FTA_released %>% 
+  group_by(any_pending, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(any_pending, fta_rate) %>% 
+  mutate(any_pending = as.factor(any_pending)) %>% 
+  mutate(region = "Statewide")
+
+FTA_released %>% 
+  group_by(region, any_pending, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(region, any_pending, fta_rate) %>% 
+  mutate(any_pending = as.factor(any_pending)) %>% 
+  bind_rows(state_pend) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>%
+  ggplot(aes(x =fct_relevel(any_pending, "1", "0"),
+             y = fta_rate,
+             fill = region))+
+  geom_chicklet(stat = "identity", width = .95*2/4, position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = any_pending, 
+                y = fta_rate),
+            hjust = 1.2, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   hjust = 1, 
+                                   face = "bold",
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .36)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("pending_4.8.tiff", width = 7, height = 4)
+
+
+```
+
+
+
+**Prior misdemeanor**
+
+```{r}
+
+
+state_misd <- FTA_released %>% 
+  filter(count_prior_misd!= "NULL") %>% 
+  group_by(misd_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(misd_cat, fta_rate) %>% 
+  mutate(region = "Statewide")
+
+FTA_released %>% 
+  filter(count_prior_misd!= "NULL") %>% 
+  group_by(region, misd_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  bind_rows(state_misd) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>% 
+  select(region, misd_cat, fta_rate) %>% 
+  ggplot(aes(x= reorder(misd_cat, -fta_rate),
+             y = fta_rate,
+             fill = region))+
+  geom_chicklet(stat = "identity", width = .8, position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = misd_cat, 
+                y = fta_rate),
+            hjust = 1.15, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white")) +
+  expand_limits(y = .39)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("prior_misd_4.9.tiff", width = 7, height = 4)
+
+```
+
+**Prior felony**
+
+```{r}
+
+
+state_fel <- FTA_released %>% 
+  filter(count_prior_nvf!= "NULL") %>% 
+  group_by(nvf_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(nvf_cat, fta_rate) %>% 
+  mutate(region = "Statewide")
+
+FTA_released %>% 
+  filter(count_prior_nvf!= "NULL") %>% 
+  group_by(region, nvf_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(region, nvf_cat, fta_rate) %>% 
+  bind_rows(state_fel) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>% 
+  ggplot(aes(x = reorder(nvf_cat, -fta_rate),
+             y = fta_rate,
+             fill = region))+
+  geom_chicklet(stat = "identity", width = .8 *3/4, position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = nvf_cat, 
+                y = fta_rate),
+            hjust = 1.15, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white")) +
+  expand_limits(y = .34)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("prior_nvf_4.10.tiff", width = 7, height = 4)
+
+```
+
+**Prior VFO**
+
+```{r}
+
+
+state_vfo <- FTA_released %>% 
+  filter(count_prior_vfo!= "NULL") %>% 
+  group_by(vfo_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(vfo_cat, fta_rate) %>% 
+  mutate(region = "Statewide")
+
+FTA_released %>% 
+  filter(count_prior_vfo!= "NULL") %>% 
+  group_by(region, vfo_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(region, vfo_cat, fta_rate) %>% 
+   bind_rows(state_vfo) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>% 
+  ggplot(aes(x = reorder(vfo_cat, -fta_rate),
+             y = fta_rate,
+             fill = region))+
+  geom_chicklet(stat = "identity", width = .8*3/4, position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = vfo_cat, 
+                y = fta_rate),
+            hjust = 1.15, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   hjust = 1, 
+                                   face = "bold",
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .31)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("prior_vfo_4.11.tiff", width = 7, height = 4)
+
+```
+
+
+**On probation or parole**
+
+```{r}
+
+state_prob <- FTA_released %>% 
+  filter(supervision!= "NULL") %>% 
+  group_by(supervision, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(supervision, fta_rate) %>% 
+  mutate(supervision = as.factor(supervision)) %>% 
+  mutate(region = "Statewide")
+
+
+FTA_released %>% 
+  filter(supervision!= "NULL") %>% 
+  group_by(region, supervision, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(region, supervision, fta_rate) %>% 
+  mutate(supervision = as.factor(supervision)) %>% 
+   bind_rows(state_prob) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>%
+  ggplot(aes(x =fct_relevel(supervision, "1", "0"),
+             y = fta_rate,
+             fill = region))+
+  geom_chicklet(stat = "identity", width = .95*2/4, position = position_dodge(width = 0.15)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = supervision, 
+                y = fta_rate),
+            hjust = 1.15, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   hjust = 1, 
+                                   face = "bold",
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow =1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .25)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("prob_parole_4.12.tiff", width = 7, height = 4)
+
+
+```
+
+
+
+**Demographics**
+
+**race ethnicity**
+
+```{r}
+
+
+state_race <- FTA_released %>% 
+  mutate(unknown = ifelse(race == "Unknown" & ethnicity %in% c("Unknown", "Non Hispanic"), "TRUE", "FALSE")) %>% filter(unknown == "FALSE") %>% 
+  group_by(race_ethnicity, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  mutate(region = "Statewide", .before = race_ethnicity)
+
+race <- FTA_released %>% 
+  mutate(unknown = ifelse(race == "Unknown" & ethnicity %in% c("Unknown", "Non Hispanic"), "TRUE", "FALSE")) %>% filter(unknown == "FALSE") %>% 
+  group_by(region, race_ethnicity, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  bind_rows(state_race) %>% 
+  filter(FTA == "1") %>% 
+  select(region, race_ethnicity, fta_rate) %>% 
+   mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) 
+
+
+  ggplot(race, 
+         aes(x= reorder(race_ethnicity,fta_rate),
+             y = fta_rate,
+             fill = region)) +
+  geom_chicklet(stat = "identity", width = .7, 
+                position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = reorder(race_ethnicity,fta_rate), 
+                y = fta_rate),
+        hjust = ifelse(race$fta_rate > .1, 1.115, -.115), 
+            color = ifelse(race$fta_rate > .1, "white", "black"),
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .3)
+
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("race_4.13.tiff", width = 7, height = 4)
+
+```
+
+
+
+**severity by race**
+
+```{r}
+
+
+state_sev_race <- FTA_released %>% 
+   mutate(unknown = ifelse(race == "Unknown" & ethnicity %in% c("Unknown", "Non Hispanic"), "TRUE", "FALSE")) %>% filter(unknown == "FALSE") %>% 
+    filter(race_ethnicity!= "Additional Groups",
+         !is.na(severity)) %>% 
+  mutate(sev_cat = fct_rev(sev_cat)) %>% 
+  group_by(sev_cat, race_ethnicity, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  mutate(region = "Statewide", .before = "sev_cat")
+
+
+sev_race <- FTA_released %>% 
+   mutate(unknown = ifelse(race == "Unknown" & ethnicity %in% c("Unknown", "Non Hispanic"), "TRUE", "FALSE")) %>% filter(unknown == "FALSE") %>% 
+    filter(race_ethnicity!= "Additional Groups",
+         !is.na(severity)) %>% 
+  mutate(sev_cat = fct_rev(sev_cat)) %>% 
+  group_by(region, sev_cat, race_ethnicity, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+    bind_rows(state_sev_race) %>% 
+    mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>% 
+  filter(FTA == "1") 
+
+
+
+
+ ggplot(data = sev_race, 
+   aes(x= sev_cat,
+             y = fta_rate,
+             fill = fct_relevel(race_ethnicity, "White","Hispanic", "Black"))) +
+  geom_chicklet(stat = "identity", width = .8, position = position_dodge(0.8))+
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = sev_cat, 
+                y = fta_rate),
+            hjust = ifelse(sev_race$fta_rate > .284, 1.1, -.1), 
+            color = ifelse(sev_race$fta_rate > .284, "white", "black"),
+            size = 2.5,
+            fontface = "bold",
+            position = position_dodge(width = 0.8)) +
+  coord_flip() + 
+  theme_bw() +
+  theme(legend.position = "top",
+        axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+            legend.key = element_rect(fill = "white"),
+        plot.margin = margin(10, 10, 10, 10, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, scales = "free_y", nrow = 2) +
+  scale_x_reordered()+
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = '', guide = guide_legend(reverse = TRUE)) +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "top",
+        plot.background = element_rect(fill = "white"),
+           legend.background  = element_rect(fill = "white", color = NA)) +
+  expand_limits(y = .35)
+
+
+  
+setwd("C:/R Projects/OCA_fta")
+ggsave("race_severity_4.14.tiff", width = 7, height = 4)
+
+```
+
+**gender**
+
+```{r}
+
+
+state_gender <- FTA_released %>% 
+  filter(gender != "Unknown") %>% 
+  mutate(gender = case_when(gender == "Male" ~ "Men",
+                            gender == "Female" ~ "Women")) %>% 
+  group_by(gender, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  mutate(region = "Statewide", .before = gender)
+
+
+FTA_released %>% 
+  filter(gender != "Unknown") %>% 
+    mutate(gender = case_when(gender == "Male" ~ "Men",
+                            gender == "Female" ~ "Women")) %>% 
+  group_by(region, gender, FTA) %>% 
+  summarise(n = n()) %>% 
+  bind_rows(state_gender) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(region, gender, fta_rate) %>% 
+     mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>% 
+  ggplot(aes(x= reorder(gender,fta_rate),
+             y = fta_rate,
+             fill = region)) +
+  geom_chicklet(stat = "identity", 
+                width = .85 *2/4,
+                position = position_dodge2(width = .1)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = reorder(gender,fta_rate), 
+                y = fta_rate),
+            hjust = 1.115, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .25)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("gender_4.15.tiff", width = 7, height = 4)
+
+```
+
+
+**age category**
+
+```{r}
+
+
+state_age <- FTA_released %>% 
+  mutate(age_cat = fct_rev(age_cat)) %>% 
+  group_by(age_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  mutate(region = "Statewide", .before = age_cat)
+
+FTA_released %>% 
+  mutate(age_cat = fct_rev(age_cat)) %>% 
+  group_by(region, age_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  bind_rows(state_age) %>% 
+  filter(FTA == "1") %>% 
+  select(region, age_cat, fta_rate) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>% 
+  ggplot(aes(x= age_cat,
+             y = fta_rate,
+             fill = region)) +
+  geom_chicklet(stat = "identity", 
+                width = .8 *3/4, 
+                position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = reorder(age_cat,fta_rate), 
+                y = fta_rate),
+            hjust = 1.115, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   hjust = 1, 
+                                   face = "bold",
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .25)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("age_4.16.tiff", width = 7, height = 4)
+
+```
+
+
+**DAT**
+
+```{r}
+
+
+state_DAT <- FTA_released %>% 
+  group_by(DAT, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(DAT, fta_rate) %>% 
+  mutate(region = "Statewide")
+
+
+FTA_released %>% 
+  group_by(region, DAT, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(region, DAT, fta_rate) %>% 
+  bind_rows(state_DAT) %>% 
+    mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>% 
+  ggplot(aes(x= reorder(DAT,fta_rate),
+             y = fta_rate,
+             fill = region)) +
+  geom_chicklet(stat = "identity", width = .95*2/4, position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = reorder(DAT,fta_rate), 
+                y = fta_rate),
+            hjust = 1.115, 
+            color = "white",
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .25)
+
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("DAT_4.17.tiff", width = 7, height = 4)
+
+```
+
+
+**release decision**
+
+```{r}
+
+
+state_release <- FTA_released %>% 
+  mutate(release_decision = case_when(release_decision == "Nonmonetary release" ~ "Nonmonetary \n Condition",
+                                    release_decision == "ROR" ~ "ROR",
+                                    release_decision == "Bail-set" ~ "Bail made")) %>% 
+  filter(release_decision != "Unknown") %>% 
+  group_by(release_decision, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(release_decision, fta_rate) %>% 
+  mutate(region = "Statewide")
+
+
+FTA_release_type <- FTA_released %>% 
+  mutate(release_decision = case_when(release_decision == "Nonmonetary release" ~ "Nonmonetary \n Condition",
+                                      release_decision == "ROR" ~ "ROR",
+                                      release_decision == "Bail-set" ~ "Bail made")) %>% 
+  filter(release_decision != "Unknown") %>% 
+  group_by(region, release_decision, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  bind_rows(state_release) %>% 
+  select(region, release_decision, fta_rate) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) 
+
+
+
+
+ ggplot(data = FTA_release_type, 
+         aes(x= reorder(release_decision, -fta_rate),
+             y = fta_rate,
+             fill = region)) +
+  geom_chicklet(stat = "identity", width = .95*2/4, position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = reorder(release_decision, fta_rate), 
+                y = fta_rate),
+            hjust = ifelse(FTA_release_type$fta_rate > .10, 1.1, -.1), 
+            color = ifelse(FTA_release_type$fta_rate > .1, "white", "black"),
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  scale_x_reordered()+
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .33)
+
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("release_decision_4.18.tiff", width = 7, height = 4)
+  
+
+
+```
+
+
+
+**release by severity**
+
+
+```{r}
+
+
+state_sev_release <- FTA_released %>% 
+  group_by(sev_cat, release_decision, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  mutate(region = "Statewide", .before = "sev_cat")
+
+
+sev_release <- FTA_released %>% 
+  group_by(region, sev_cat, release_decision, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+    bind_rows(state_sev_release) %>% 
+    mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) %>% 
+  mutate(sev_cat = as_factor(sev_cat),
+  sev_cat = fct_relevel(sev_cat, "Violent Felony", "Nonviolent Felony", "Misdemeanor")) %>% 
+  filter(FTA == "1") 
+
+
+
+
+ ggplot(data = sev_release, 
+   aes(x= sev_cat,
+             y = fta_rate,
+             fill = fct_relevel(release_decision, "Nonmonetary release","ROR"))) +
+  geom_chicklet(stat = "identity", width = .8, position = position_dodge(0.8))+
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = sev_cat, 
+                y = fta_rate),
+            hjust = ifelse(sev_release$fta_rate > .03, 1.1, -.1), 
+            color = ifelse(sev_release$fta_rate > .03, "white", "black"),
+            size = 2.5,
+            fontface = "bold",
+            position = position_dodge(width = 0.8)) +
+  coord_flip() + 
+  theme_bw() +
+  theme(legend.position = "top",
+         legend.background  = element_rect(fill = "white", color = NA), 
+        axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(5, 5, 5, 5, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, scales = "free_y", nrow = 2) +
+  scale_x_reordered()+
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = '', guide = guide_legend(reverse = TRUE)) +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "top",
+        plot.background = element_rect(fill = "white"),
+        legend.key = element_rect(fill = "white")) +
+  expand_limits(y = .37)
+
+
+  
+setwd("C:/R Projects/OCA_fta")
+ggsave("release_severity_4.19.tiff", width = 7, height = 4)
+
+```
+
+**appearance count**
+
+```{r}
+
+# appearance cat
+
+
+
+state_app <- FTA_released %>% 
+  mutate(app_released_cat = as.character(app_released_cat)) %>% 
+  mutate(app_released_cat = fct_relevel(app_released_cat, "10+","9","8","7","6","5","4", "3", "2", "1")) %>% 
+  group_by(app_released_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  select(app_released_cat, fta_rate) %>% 
+  mutate(region = "Statewide")
+
+
+
+FTA_app <- FTA_released %>% 
+  mutate(app_released_cat = as.character(app_released_cat)) %>% 
+  mutate(app_released_cat = fct_relevel(app_released_cat, "10+","9","8","7","6","5","4", "3", "2", "1")) %>% 
+  group_by(region, app_released_cat, FTA) %>% 
+  summarise(n = n()) %>% 
+  mutate(fta_rate = n/sum(n)) %>% 
+  filter(FTA == "1") %>% 
+  bind_rows(state_app) %>% 
+  select(region, app_released_cat, fta_rate) %>% 
+  mutate(region = as.factor(region),
+         region = fct_relevel(region, "NYC", "NYC Suburb", "Upstate","Statewide")) 
+
+
+ggplot(data = FTA_app,
+       aes(x= app_released_cat,
+           y = fta_rate,
+           fill = region)) +
+  geom_chicklet(stat = "identity", width = .8, position = position_dodge(0.95)) +
+  geom_text(aes(label = percent(fta_rate, accuracy = 1), 
+                x = app_released_cat, 
+                y = fta_rate),
+            hjust = ifelse(FTA_app$fta_rate > .10, 1.05, -.05), 
+            color = ifelse(FTA_app$fta_rate > .10, "white", "black"),
+            size = 3,
+            fontface = "bold") +
+  coord_flip() + 
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 9,
+                                   family = "Knockout", 
+                                   face = "bold",
+                                   hjust = 1, 
+                                   margin = margin(r = 5, unit = "pt")),
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+         panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.background =element_rect(fill="white"))+
+  scale_y_continuous(expand=c(0,0), labels = NULL) +
+  facet_wrap(~region, nrow = 1) +
+  labs(x = '', y = '') +
+  scale_fill_manual(values = custom_colors, name = "region") +
+  easy_remove_x_axis(what = c("line", "ticks")) +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+  theme(legend.position = "none",
+        plot.background = element_rect(fill = "white")) +
+  expand_limits(y = .52)
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("app_4.20.tiff", width = 7, height = 4)
+
+```
+
