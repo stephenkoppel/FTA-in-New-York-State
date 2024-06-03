@@ -1,0 +1,166 @@
+---
+title: "Untitled"
+author: "Stephen Koppel"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Predict held
+
+```{r}
+
+held_model_data <- FTA_arraign %>% 
+  mutate(held = ifelse(arraign_outcome %in% c("Bail-set", "Remanded"), "1", "0")) %>%
+  mutate(held = as.factor(held)) %>% 
+  mutate(any_pending = ifelse(pend_misd == 1|pend_nvf == 1|pend_vfo ==1, "Yes","No")) %>% 
+mutate(misd_cat = case_when(count_prior_misd == 0 ~ "0",
+                                    count_prior_misd == 1 ~ "1",
+                                    count_prior_misd %in% c(2,3,4) ~ "2 to 4",
+                                    count_prior_misd %in% c(5,6,7,8,9,10) ~ "5+")) %>% 
+mutate(nvf_cat = case_when(count_prior_nvf == 0 ~ "0",
+                                    count_prior_nvf == 1 ~ "1",
+                                    count_prior_nvf %in% c(2,3,4) ~ "2+")) %>% 
+mutate(vfo_cat = case_when(count_prior_vfo == 0 ~ "0",
+                                    count_prior_vfo == 1 ~ "1",
+                                    count_prior_vfo == 2 ~ "2+")) %>% 
+mutate(race_ethnicity = case_when(ethnicity == "Hispanic" ~ "Hispanic",
+                                          race == "Black" ~ "Black",
+                                          race == "White" ~ "White",
+                                          TRUE ~ "Additional Groups")) %>% 
+  mutate(age_cat = case_when (age_at_arrest < 25 ~ "<25",
+                              age_at_arrest >= 25 & age_at_arrest < 55 ~ "25-54",
+                              age_at_arrest > 54 ~ "55+")) %>% 
+mutate(supervision = case_when(supervision == "1" ~ "Yes",
+                                     supervision == "0" ~ "No")) %>% 
+mutate(DV = case_when(order_of_protection == "Family Offense" ~ "Yes",
+                                     is.na(order_of_protection) ~ "No",
+                                     TRUE ~ "No")) %>% 
+ mutate(DAT = ifelse(arrest_type == "DAT", "Yes","No")) %>% 
+    transmute(held,
+            sev_cat,
+             charge_cat = factor(charge_cat, levels = c("Other", "Burglary", "Criminal contempt", "Criminal mischief", "DWI", "Felony assault", "Felony drug", "Felony weapon", "Grand larceny", "Misd assault", "Misd drug", "Petit larceny", "Robbery")),
+            DV,
+            any_pending,
+            misd_cat,
+         nvf_cat,
+         vfo_cat,
+         supervision,
+         race_ethnicity = factor(race_ethnicity, levels = c("White", "Black", "Hispanic", "Additional Groups")),
+         gender = ifelse(gender == "Unknown", NA, gender),
+         age_cat,
+         DAT,
+         region = factor(region, levels = c("NYC", "NYC Suburb", "Upstate"))
+         ) %>% 
+  na.omit()
+
+```
+
+```{r}
+
+
+
+model_held <- glm(formula = held ~ sev_cat + charge_cat + DV + any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + DV + region, data = held_model_data, family = binomial(link = "logit"))
+
+
+
+held_ame <- margins(model_held)
+
+ame_predict_held <- data.frame(unclass(summary(held_ame)), check.names = FALSE) %>% select(factor, AME, p)  %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+psuedo_held <- pR2(model_held)
+
+setwd("C:/R Projects/OCA_fta")
+ame_predict_held %>% 
+   write.csv(., file = "predict_held_overall.csv")
+
+
+```
+
+
+```{r}
+
+datavfo_held <- held_model_data %>% filter(sev_cat == "Violent Felony") 
+
+model_held_vfo <- glm(formula = held ~  DV + any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + region, data = datavfo_held, family = binomial(link = "logit"))
+
+
+held_ame_vfo <- margins(model_held_vfo)
+
+ame_predict_held_vfo <- data.frame(unclass(summary(held_ame_vfo)), check.names = FALSE) %>% select(factor, AME, p)  %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+psuedo_held_vfo <- pR2(model_held_vfo)
+
+setwd("C:/R Projects/OCA_fta")
+ame_predict_held_vfo %>% 
+   write.csv(., file = "predict_held_vfo_statewide.csv")
+
+```
+
+
+```{r}
+
+datanyc_held <- held_model_data %>% filter(sev_cat == "Violent Felony", region == "NYC")
+
+model_held_nyc_vfo <- glm(formula = held ~  DV + any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat, data = datanyc_held, family = binomial(link = "logit"))
+
+
+held_ame_nyc_vfo <- margins(model_held_nyc_vfo)
+
+ame_predict_held_nyc_vfo <- data.frame(unclass(summary(held_ame_nyc_vfo)), check.names = FALSE) %>% select(factor, AME, p)  %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+psuedo_held_vfo_nyc <- pR2(model_held_nyc_vfo)
+
+
+setwd("C:/R Projects/OCA_fta")
+ame_predict_held_nyc_vfo %>% 
+   write.csv(., file = "predict_held_vfo_nyc.csv")
+
+```
+
+
+```{r}
+
+datasub_held <- held_model_data %>% filter(sev_cat == "Violent Felony", region == "NYC Suburb")
+
+model_held_sub_vfo <- glm(formula = held ~  DV + any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat, data = datasub_held, family = binomial(link = "logit"))
+
+
+held_ame_sub_vfo <- margins(model_held_sub_vfo)
+
+
+ame_predict_held_sub_vfo <- data.frame(unclass(summary(held_ame_sub_vfo)), check.names = FALSE) %>% select(factor, AME, p)  %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+psuedo_held_sub_nyc <- pR2(model_held_sub_vfo)
+
+
+setwd("C:/R Projects/OCA_fta")
+ame_predict_held_sub_vfo %>% 
+   write.csv(., file = "predict_held_vfo_sub.csv")
+
+```
+
+
+```{r}
+
+dataup_held <- held_model_data %>% filter(sev_cat == "Violent Felony", region == "Upstate")
+
+model_held_up_vfo <- glm(formula = held ~  DV + any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat, data = dataup_held, family = binomial(link = "logit"))
+
+
+held_ame_up_vfo <- margins(model_held_up_vfo)
+
+ame_predict_held_up_vfo <- data.frame(unclass(summary(held_ame_up_vfo)), check.names = FALSE) %>% select(factor, AME, p)  %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+psuedo_held_up_vfo <- pR2(model_held_up_vfo)
+
+setwd("C:/R Projects/OCA_fta")
+ame_predict_held_up_vfo %>% 
+   write.csv(., file = "predict_held_vfo_up.csv")
+
+```
+
