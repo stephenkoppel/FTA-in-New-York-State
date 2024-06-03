@@ -1,0 +1,372 @@
+---
+title: "chapter 3"
+author: "Stephen Koppel"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+## Failure to Appear in NY, Section 3
+
+
+```{r}
+
+
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(ggthemes)
+library(ggeasy)
+library(sjmisc)
+library(weights)
+library(scales)
+library(ggh4x)
+library(showtext)
+library(extrafont)
+library(tidytext)
+library(signs)
+library(forcats)
+library(ggchicklet)
+library(margins)
+library(pscl)
+library(car)
+library(prediction)
+library(pROC)
+library(marginaleffects)
+
+
+
+```
+
+
+
+
+```{r}
+
+# color palette and fonts
+
+
+custom_colors <- c(c("#3b4982", "#00aeff", "#f79548", "#abadb0"))
+
+library(showtext)
+font_add(family = "Impact", regular = "impact.ttf")
+font_add(family = "Knockout", regular = "C:/R Projects/Police Reform/Graphs/Knockout-32JuniorCruisewt.otf")
+
+
+ 
+```
+
+
+```{r}
+
+# pull separate NYC and ONYC files and bind
+
+setwd("C:/R Projects/OCA_fta")
+OCA_FTA <- read_csv("NYC_fta.csv")
+ONYC <- read_csv("ONYC_fta.csv")
+FTA <- rbind(OCA_FTA, ONYC) 
+
+
+```
+
+
+
+
+```{r}
+
+# take relevant columns with light recoding and drop out all dockets disposed at arraign
+
+
+FTA <- FTA %>% 
+  clean_names() %>% 
+  transmute(arrest_event_id = arr_cycle_id,
+            app_count_released = app_count_arraign_to_dispo_released,
+            app_count_detained = app_count_arraign_to_dispo_detained,
+            disposition = disposition_type,
+            disposition_detail, 
+            days_to_dispo = days_arraign_to_dispo, 
+            region,
+            case_type,
+            arraign_date = mdy(first_arraign_date),
+            year = year(arraign_date),
+            county = county_name,
+            arrest_type,
+            severity = top_severity_at_arraign,
+            vfo = top_charge_at_arraign_violent_felony_ind,
+            law = top_arraign_law,
+            charge = top_arraign_article_section,
+            raw_charge = top_charge_at_arraign, 
+            release_decision = release_decision_at_arraign,
+            gender,
+            race, 
+            ethnicity,
+            age_at_arrest,
+            FTA = ifelse(warrant_ordered_btw_arraign_and_dispo == "Y", 1, 0),
+            length = days_arraign_to_dispo,
+            count_prior_misd = prior_misd_cnt,
+            count_prior_nvf = prior_nonvfo_cnt,
+            count_prior_vfo = prior_vfo_cnt,
+            pend_misd,
+            pend_nvf = pend_nonvfo,
+            pend_vfo,
+            dollar_bail = if_else(first_bail_set_cash == 1, "TRUE", "FALSE"),
+            case_type,
+            supervision,
+            order_of_protection
+            ) %>% 
+   mutate(region = case_when(county %in% c("Bronx", "Kings", "New York", "Queens", "Richmond") ~ "NYC",
+                                         county %in% c("Nassau", "Rockland", "Suffolk", "Westchester") ~ "NYC Suburb",
+                            TRUE ~ "Upstate")) 
+
+
+```
+
+
+```{r}
+
+FTA %>% mutate(missing_case = ifelse(arrest_event_id  == "NULL", TRUE, FALSE)) %>%
+filter(arraign_date>= "2022-01-01" & arraign_date <= "2022-12-01") %>% 
+count(missing_case) %>% mutate(percent_missing = n/sum(n)) 
+
+# 15% of dockets missing a case ID from DCJ in sample year
+
+
+```
+
+
+```{r}
+
+# create object and prep cases for release decision analysis, which will include all case types, and will take the earliest arraign, with tie splitting for earliest case based first on severity and then release restrictiveness 
+
+#drop out disposed cases
+
+FTA_arraign <- FTA %>% 
+  filter(release_decision != "Disposed at arraign")
+
+# create pseudo ID that accounts for cases with NULL arrest event ID due to lack of criminal history info from DCJS
+
+
+
+FTA_arraign <- FTA_arraign %>% mutate(case_id = ifelse(arrest_event_id  == "NULL", row_number(), arrest_event_id)) 
+
+FTA_arraign <- FTA_arraign %>% select(-arrest_event_id) %>% rename(arrest_event_id = case_id)
+
+# flag earliest arraignment date
+
+FTA_arraign <- FTA_arraign %>% group_by(arrest_event_id) %>% 
+  mutate(earliest_arraign = min(arraign_date)) %>% 
+  ungroup()
+
+# flag most serious offense across each arraign date
+
+FTA_arraign <- FTA_arraign %>% mutate(sev_cat = case_when(severity == "Misdemeanor" ~ 1,
+                         severity == "Felony" & vfo != "Y" ~ 2,
+                         vfo == "Y" ~ 3)) 
+
+# flag most restrictive release decision
+
+FTA_arraign <- FTA_arraign %>% mutate(release_cat = case_when(release_decision == "Unknown" ~ 1,
+                                                              release_decision == "ROR" ~ 2,
+                         release_decision == "Nonmonetary release" ~ 3,
+                         release_decision == "Bail-set" ~ 4,
+                         release_decision == "Remanded" ~ 5)) 
+
+
+FTA_arraign <- FTA_arraign %>% group_by(arrest_event_id, arraign_date) %>% 
+  mutate(most_severe = max(sev_cat),
+         arraign_outcome = max(release_cat)) %>% 
+  ungroup()
+
+
+
+
+# take the first of the most severe charge/worst release outcome
+
+FTA_arraign <- FTA_arraign %>% 
+  group_by(arrest_event_id) %>%   
+  arrange(arrest_event_id, arraign_date, sev_cat) %>%
+  filter(arraign_date == earliest_arraign, sev_cat == most_severe) %>% 
+  slice_head() %>% 
+  ungroup()
+
+
+# recode sev cat back 
+
+FTA_arraign <- FTA_arraign %>% mutate(sev_cat = case_when(severity == "Misdemeanor" ~ "Misdemeanor",
+                         severity == "Felony" & vfo != "Y" ~ "Nonviolent Felony",
+                         vfo == "Y" ~ "Violent Felony")) 
+
+# recode release cat back 
+
+FTA_arraign <- FTA_arraign %>% mutate(arraign_outcome = case_when(release_cat == 1 ~ "Unknown",
+                                                release_cat == 2 ~ "ROR",
+                         release_cat == 3 ~ "Nonmonetary release",
+                         release_cat == 4 ~ "Bail-set",
+                         release_cat == 5 ~ "Remanded")) 
+
+
+# recode offense type
+
+FTA_arraign <- FTA_arraign %>% 
+  mutate(charge_cat = case_when(str_detect(charge, "120") & severity == "Felony" ~ "Felony assault",
+                                str_detect(charge, "120") & severity == "Misdemeanor" ~ "Misd assault",
+                                charge == "155.25" ~ "Petit larceny",
+                                str_detect(charge, "155") & severity == "Felony" ~ "Grand larceny",
+                                charge == "1192" ~ "DWI",
+                                str_detect(charge, "220") & severity == "Misdemeanor" ~ "Misd drug",
+                                str_detect(charge, "220") & severity == "Felony" ~ "Felony drug",
+                                str_detect(charge, "265") & severity == "Felony" ~ "Felony weapon",
+                                str_detect(charge, "145") ~ "Criminal mischief",
+                                charge %in% c("215.5", "215.51", "215.52") ~ "Criminal contempt",
+                                charge %in% c("140.2", "140.25", "140.3") ~ "Burglary",
+                                charge %in% c("160.05", "160.1", "160.15") ~ "Robbery")) %>% 
+           mutate(charge_cat = case_when(!is.na(charge_cat) ~ charge_cat,
+                                         !is.na(charge) ~ "Other")) 
+
+# recode several errors where petit larceny is classified as a nonviolent felony
+
+FTA_arraign <- FTA_arraign %>% mutate(sev_cat = case_when(charge_cat == "Petit larceny" & sev_cat == "Nonviolent Felony" ~ "Misdemeanor",
+                                   TRUE ~ sev_cat))
+
+
+
+# restrict to true release outcomes (excludes unknown, dollar bail, and disposed at arraignment) for study period
+
+
+FTA_arraign <- FTA_arraign %>%  filter(arraign_outcome != "Unknown") %>% 
+  filter(dollar_bail %in% c("FALSE", NA)) %>% 
+  filter(arraign_date>= "2022-01-01" & arraign_date <= "2022-12-01")
+
+# drops 2119 cases with unknown outcome (1%)
+
+
+```
+
+
+
+```{r}
+
+state_arraign_outcome <- FTA_arraign %>% 
+   mutate(arraign_outcome = fct_relevel(arraign_outcome, "Remanded", "Bail-set", "Nonmonetary release", "ROR")) %>% 
+  group_by(arraign_outcome) %>% 
+  summarise(n = n()) %>% 
+  mutate(percent = n / sum(n) * 100) %>% 
+  mutate(percent = round(percent)) %>% 
+  mutate(region = "Statewide", .before = arraign_outcome)
+
+
+
+FTA_arraign %>% 
+    mutate(arraign_outcome = fct_relevel(arraign_outcome, "Remanded", "Bail-set", "Nonmonetary release", "ROR")) %>%
+  group_by(region, arraign_outcome) %>% 
+  summarise(n = n()) %>% 
+  mutate(percent = n / sum(n) * 100) %>% 
+  mutate(percent = round(percent)) %>% 
+  bind_rows(state_arraign_outcome) %>% 
+   mutate(region = as.factor(region),
+          region = fct_relevel(region, "NYC",  "NYC Suburb", "Upstate", "Statewide")) %>%
+  ggplot(aes(region, percent, fill = arraign_outcome)) +
+  geom_bar(stat = "identity", position = "fill", 
+           width = 0.85, 
+           key_glyph = draw_key_point) +
+ geom_text(aes(label = ifelse(percent > 2.5, 
+                              sprintf("%d%%", percent), "")), 
+           size = 3.5, 
+           position = position_fill(vjust = 0.5), 
+           color = "white", 
+           family = "Knockout", 
+           fontface = "bold") +
+  theme_classic() +
+  theme(axis.text = element_text(size = 11),
+        axis.text.y=element_blank(), 
+        axis.text.x = element_text(size = 9, 
+                                   family = "Knockout",
+                                   face = "bold"),
+        plot.background = element_rect(fill = "white"), 
+        legend.background  = element_rect(fill = "white", color = NA), 
+        panel.background = element_rect(fill = "white"),
+         plot.margin = margin(10, 10, 10, 10, "pt"),
+        legend.position = "none",
+        text = element_text(family = "Knockout"),
+        axis.line.x = element_line(size = .05),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = c("#abadb0","#f79548","#00aeff","#3b4982"), name = "") +
+  labs(y = '', x = '', color = '') +
+  guides(fill = guide_legend(reverse = TRUE, override.aes = list(shape = 21, size = 5))) +
+  easy_remove_y_axis(what = c("line", "ticks"))+
+  easy_remove_x_axis(what = c("line", "ticks"))
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("release_3.1.tiff", width = 5.75, height = 3.25)
+
+```
+
+
+
+```{r}
+
+state_arraign_sev <- FTA_arraign %>% 
+  group_by(sev_cat, arraign_outcome) %>% 
+  summarise(n = n()) %>% 
+  mutate(percent = n / sum(n) * 100) %>% 
+  mutate(percent = round(percent)) %>% 
+     mutate(sev_cat = case_when(sev_cat == "Misdemeanor" ~ "Misd",
+                                sev_cat == "Nonviolent Felony" ~ "NVF",
+                                sev_cat == "Violent Felony" ~ "VFO")) %>% 
+   mutate(arraign_outcome = fct_relevel(arraign_outcome, "Remanded", "Bail-set", "Nonmonetary release", "ROR")) %>% 
+  mutate(region = "Statewide", .before = arraign_outcome)
+
+FTA_arraign %>% 
+  group_by(sev_cat, region, arraign_outcome) %>% 
+  summarise(n = n()) %>% 
+  mutate(percent = n / sum(n) * 100) %>% 
+  mutate(percent = round(percent)) %>% 
+       mutate(sev_cat = case_when(sev_cat == "Misdemeanor" ~ "Misd",
+                                sev_cat == "Nonviolent Felony" ~ "NVF",
+                                sev_cat == "Violent Felony" ~ "VFO")) %>% 
+   mutate(arraign_outcome = fct_relevel(arraign_outcome, "Remanded", "Bail-set", "Nonmonetary release", "ROR")) %>%
+    bind_rows(state_arraign_sev) %>% 
+   mutate(region = as.factor(region),
+          region = fct_relevel(region, "NYC",  "NYC Suburb", "Upstate", "Statewide")) %>%
+  ggplot(aes(x = sev_cat, y = percent, fill = arraign_outcome)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.85, key_glyph = draw_key_point) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 9, 
+                                   family = "Knockout",
+                                   face = "bold"),
+        plot.background = element_rect(fill = "white"), 
+        legend.background  = element_rect(fill = "white", color = NA), 
+        panel.background = element_rect(fill = "white"),
+         plot.margin = margin(10, 10, 10, 10, "pt"),
+        text = element_text(family = "Knockout"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        axis.text.y=element_blank(), 
+        legend.position = "none",
+        legend.text = element_text(size = 11),
+        strip.text = element_text(size = 11),
+         axis.line.x = element_line(size = .05),
+        strip.background =element_rect(fill="white")) +
+  scale_fill_manual(values = c("#abadb0","#f79548","#00aeff","#3b4982"), name = "", guide = guide_legend(reverse = TRUE)) +
+  labs(y = '', x = '', color = '') +
+  easy_remove_y_axis(what = c("line", "ticks")) +
+    easy_remove_x_axis(what = c("line", "ticks")) +
+  scale_y_continuous(labels = NULL) +
+  guides(fill = guide_legend(reverse = TRUE, override.aes = list(shape = 21, size = 5))) +
+  facet_wrap(vars(region), nrow = 1) +
+  geom_text(aes(label = ifelse(percent > 1.5, sprintf("%d%%", percent), "")), size = 2.8, position = position_fill(vjust = 0.5), color = "white", fontface = "bold", family = "Knockout")
+
+
+setwd("C:/R Projects/OCA_fta")
+ggsave("release_severity_3.2.tiff", width = 7, height = 4)
+
+
+```
+
+
