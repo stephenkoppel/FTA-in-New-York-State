@@ -1,0 +1,1405 @@
+---
+title: "main model FTA"
+author: "Stephen Koppel"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Main predictive model of FTA
+
+
+```{r}
+
+# data for model of released with ref categories set and excluding rows with missing values (mainly missing criminal history)
+
+
+model_data_statewide <- FTA_released %>% 
+  transmute(FTA,
+            sev_cat,
+             charge_cat = factor(charge_cat, levels = c("Other", "Burglary", "Criminal contempt", "Criminal mischief", "DWI", "Felony assault", "Felony drug", "Felony weapon", "Grand larceny", "Misd assault", "Misd drug", "Petit larceny", "Robbery")),
+            DV,
+            any_pending,
+            misd_cat,
+         nvf_cat,
+         vfo_cat,
+         supervision,
+         race_ethnicity = factor(race_ethnicity, levels = c("White", "Black", "Hispanic", "Additional Groups")),
+         gender = ifelse(gender == "Unknown", NA, gender),
+         age_cat,
+         DAT,
+         release_decision = factor(release_decision, levels = c("ROR", "Nonmonetary release")),
+         region = factor(region, levels = c("NYC", "NYC Suburb", "Upstate")),
+         app_released_cat
+         ) %>%
+  na.omit()
+
+# na.omit mainly drops out individuals lacking NYSID and therefore criminal history measures
+
+
+```
+
+
+
+## Statewide analysis
+
+```{r}
+
+mod_statewide <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision + region + app_released_cat, data = model_data_statewide, family = binomial(link = "logit"))
+
+
+vif(mod_statewide)
+
+psuedo_statewide <- pR2(mod_statewide)
+# mcfadden's = .24
+
+ame <- margins(mod_statewide)
+
+results_all <- data.frame(unclass(summary(ame)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(region = "Statewide") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+
+```
+
+
+```{r}
+
+
+# calculating adjusted predictions by hand (equivalent to Stata's average adjusted predictions produced by the 'margins' command. )
+
+overall <- predict(mod_statewide, model_data_statewide, type = "response")
+mean(overall)
+#16.8
+
+
+misd_predict_state <- predict(mod_statewide,transform(model_data_statewide,sev_cat="Misdemeanor"),type='response') 
+
+pp_misd_state <- mean(misd_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misdemeanor")
+
+
+nvf_predict_state <- predict(mod_statewide,transform(model_data_statewide,sev_cat="Nonviolent Felony"),type='response') 
+
+pp_nvf_state <- mean(nvf_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Nonviolent Felony")
+
+vfo_predict_state <- predict(mod_statewide,transform(model_data_statewide,sev_cat="Violent Felony"),type='response') 
+mean(vfo_predict_state)
+
+pp_vfo_state <- mean(vfo_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("VFO")
+
+other_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Other"),type='response') 
+
+pp_other_state <- mean(other_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Other")
+
+burg_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Burglary"),type='response') 
+
+pp_burg_state <- mean(burg_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Burglary")
+
+contempt_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Criminal contempt"),type='response') 
+
+pp_contempt_state <- mean(contempt_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Criminal contempt")
+
+mischief_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Criminal mischief"),type='response') 
+
+pp_mischief_state <- mean(mischief_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Criminal mischief")
+
+
+dwi_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="DWI"),type='response') 
+
+pp_dwi_state <- mean(dwi_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DWI")
+
+felassault_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Felony assault"),type='response') 
+
+pp_felassault_state <- mean(felassault_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony assault")
+
+feldrug_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Felony drug"),type='response') 
+
+pp_feldrug_state <- mean(feldrug_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony drug")
+
+felweapon_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Felony weapon"),type='response') 
+
+pp_felweapon_state <- mean(felweapon_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony weapon")
+
+
+glarceny_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Grand larceny"),type='response') 
+
+pp_glarceny_state <- mean(glarceny_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Grand larceny")
+
+misdassault_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Misd assault"),type='response') 
+
+pp_misdassault_state <- mean(misdassault_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misd assault")
+
+misddrug_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Misd drug"),type='response') 
+
+pp_misddrug_state <- mean(misddrug_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misd drug")
+
+petit_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Petit larceny"),type='response') 
+
+pp_petit_state <- mean(petit_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Petit larceny")
+
+rob_predict_state <- predict(mod_statewide,transform(model_data_statewide,charge_cat="Robbery"),type='response') 
+
+pp_rob_state <- mean(rob_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Robbery")
+
+
+nopend_predict_state <- predict(mod_statewide,transform(model_data_statewide,any_pending="No"),type='response') 
+
+pp_nopend_state <- mean(nopend_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No pending")
+
+pend_predict_state <- predict(mod_statewide,transform(model_data_statewide,any_pending="Yes"),type='response') 
+
+pp_pend_state <- mean(pend_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Has pending")
+
+misdconv0_predict_state <- predict(mod_statewide,transform(model_data_statewide,misd_cat="0"),type='response') 
+
+pp_misdconv0_state <- mean(misdconv0_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No Misd Convictions")
+
+misdconv1_predict_state <- predict(mod_statewide,transform(model_data_statewide,misd_cat="1"),type='response') 
+
+pp_misdconv1_state <- mean(misdconv1_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 Misd Conviction")
+
+misdconv2_predict_state <- predict(mod_statewide,transform(model_data_statewide,misd_cat="2 to 4"),type='response') 
+
+pp_misdconv2_state <- mean(misdconv2_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2-4 Misd Convictions")
+
+misdconv5_predict_state <- predict(mod_statewide,transform(model_data_statewide,misd_cat="5+"),type='response') 
+
+pp_misdconv5_state <- mean(misdconv5_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("5+ Misd Convictions")
+
+
+nvfconv0_predict_state <- predict(mod_statewide,transform(model_data_statewide,nvf_cat="0"),type='response') 
+
+pp_nvfconv0_state <- mean(nvfconv0_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No NVF Convictions")
+
+nvfconv1_predict_state <- predict(mod_statewide,transform(model_data_statewide,nvf_cat="1"),type='response') 
+
+pp_nvfconv1_state <- mean(nvfconv1_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 NVF Conviction")
+
+nvfconv2_predict_state <- predict(mod_statewide,transform(model_data_statewide,nvf_cat="2+"),type='response') 
+
+pp_nvfconv2_state <- mean(nvfconv2_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2 NVF Convictions")
+
+
+vfoconv0_predict_state <- predict(mod_statewide,transform(model_data_statewide,vfo_cat="0"),type='response') 
+
+pp_vfoconv0_state <- mean(vfoconv0_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No vfo Convictions")
+
+vfoconv1_predict_state <- predict(mod_statewide,transform(model_data_statewide,vfo_cat="1"),type='response') 
+
+pp_vfoconv1_state <- mean(vfoconv1_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 vfo Conviction")
+
+vfoconv2_predict_state <- predict(mod_statewide,transform(model_data_statewide,vfo_cat="2+"),type='response') 
+
+pp_vfoconv2_state <- mean(vfoconv2_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2 vfo Convictions")
+
+
+ROR_predict_state <- predict(mod_statewide,transform(model_data_statewide,release_decision="ROR"),type='response') 
+
+pp_ROR_state <- mean(ROR_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("ROR")
+
+NMR_predict_state <- predict(mod_statewide,transform(model_data_statewide,release_decision="Nonmonetary release"),type='response') 
+
+pp_NRM_state <- mean(NMR_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("NMR")
+
+nosup_predict_state <- predict(mod_statewide,transform(model_data_statewide,supervision="No"),type='response') 
+
+pp_nosup_state <- mean(nosup_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No supervision")
+
+sup_predict_state <- predict(mod_statewide,transform(model_data_statewide,supervision="Yes"),type='response') 
+
+pp_sup_state <- mean(sup_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Supervision")
+
+nodv_predict_state <- predict(mod_statewide,transform(model_data_statewide, DV="No"),type='response') 
+
+pp_nodv_state <- mean(nodv_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No DV")
+
+
+dv_predict_state <- predict(mod_statewide,transform(model_data_statewide, DV="Yes"),type='response') 
+
+pp_dv_state <- mean(dv_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DV")
+
+DAT_predict_state <- predict(mod_statewide,transform(model_data_statewide, DAT="Yes"),type='response') 
+
+pp_DAT_state <- mean(DAT_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DAT")
+
+NODAT_predict_state <- predict(mod_statewide,transform(model_data_statewide, DAT="No"),type='response') 
+
+pp_NODAT_state <- mean(NODAT_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No DAT")
+
+
+white_predict_state <- predict(mod_statewide,transform(model_data_statewide, race_ethnicity="White"),type='response') 
+
+pp_white_state <- mean(white_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("White")
+
+black_predict_state <- predict(mod_statewide,transform(model_data_statewide, race_ethnicity="Black"),type='response') 
+
+pp_black_state <- mean(black_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Black")
+
+hispanic_predict_state <- predict(mod_statewide,transform(model_data_statewide, race_ethnicity="Hispanic"),type='response') 
+
+pp_hispanic_state <- mean(hispanic_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Hispanic")
+
+othergroup_predict_state <- predict(mod_statewide,transform(model_data_statewide, race_ethnicity="Additional Groups"),type='response') 
+
+pp_othergroup_state <- mean(othergroup_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Additional Groups")
+
+
+male_predict_state <- predict(mod_statewide,transform(model_data_statewide, gender="Male"),type='response') 
+
+pp_male_state <- mean(male_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Male")
+
+male_predict_state <- predict(mod_statewide,transform(model_data_statewide, gender="Male"),type='response') 
+
+pp_male_state <- mean(male_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Male")
+
+female_predict_state <- predict(mod_statewide,transform(model_data_statewide, gender="Female"),type='response') 
+
+pp_female_state <- mean(female_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Female")
+
+age24_predict_state <- predict(mod_statewide,transform(model_data_statewide, age_cat="<25"),type='response') 
+
+pp_age24_state <- mean(age24_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("<25")
+
+age25_predict_state <- predict(mod_statewide,transform(model_data_statewide, age_cat="25-54"),type='response') 
+
+pp_age25_state <- mean(age25_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("25-54")
+
+
+age55_predict_state <- predict(mod_statewide,transform(model_data_statewide, age_cat="55+"),type='response') 
+
+pp_age55_state <- mean(age55_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("55+")
+
+regNYC_predict_state <- predict(mod_statewide,transform(model_data_statewide, region ="NYC"),type='response') 
+
+pp_regNYC_state <- mean(regNYC_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("NYC")
+
+regsub_predict_state <- predict(mod_statewide,transform(model_data_statewide, region ="NYC Suburb"),type='response') 
+
+pp_regsub_state <- mean(regsub_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("NYC Suburb")
+
+regupstate_predict_state <- predict(mod_statewide,transform(model_data_statewide, region ="Upstate"),type='response') 
+
+pp_regupstate_state <- mean(regupstate_predict_state) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Upstate")
+
+
+
+
+statewide_pp_table <- bind_rows(pp_misd_state, pp_nvf_state, pp_vfo_state, pp_other_state, pp_burg_state, pp_contempt_state,  pp_dwi_state, pp_felassault_state, pp_feldrug_state, pp_felweapon_state, pp_glarceny_state, pp_misdassault_state, pp_misddrug_state, pp_mischief_state, pp_petit_state, pp_rob_state, pp_pend_state, pp_nopend_state, pp_misdconv0_state, pp_misdconv1_state, pp_misdconv2_state, pp_misdconv5_state, pp_nvfconv0_state, pp_nvfconv1_state, pp_nvfconv2_state, pp_vfoconv0_state, pp_vfoconv1_state, pp_vfoconv2_state, pp_ROR_state, pp_NRM_state, pp_nosup_state, pp_sup_state, pp_nodv_state, pp_dv_state, pp_DAT_state, pp_NODAT_state, pp_white_state, pp_black_state, pp_hispanic_state, pp_othergroup_state, pp_male_state, pp_female_state, pp_age24_state, pp_age25_state, pp_age55_state, pp_regNYC_state, pp_regsub_state, pp_regupstate_state) %>% mutate(region = "Statewide") %>% rownames_to_column(var = "predictor")
+
+```
+
+
+
+### NYC analysis 
+
+```{r}
+
+
+mod_nyc_all <- model_data_statewide %>%
+  filter(region == "NYC") 
+
+
+mod_nyc <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision + app_released_cat, data = mod_nyc_all, family = binomial(link = "logit")) 
+
+psuedo_nyc <- pR2(mod_nyc)
+#mcfadden's = .29
+
+vif(mod_nyc)
+
+ame_nyc <- margins(mod_nyc)
+
+results_nyc <- data.frame(unclass(summary(ame_nyc)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(region = "NYC") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+```
+
+```{r}
+
+# predicted probabilities for NYC
+
+nyc_pp <- predict(mod_nyc, mod_nyc_all, type = "response")
+mean(nyc_pp)
+#15.6
+
+
+misd_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,sev_cat="Misdemeanor"),type='response') 
+
+pp_misd_nyc <- mean(misd_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misdemeanor")
+
+
+nvf_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,sev_cat="Nonviolent Felony"),type='response') 
+
+pp_nvf_nyc <- mean(nvf_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Nonviolent Felony")
+
+vfo_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,sev_cat="Violent Felony"),type='response') 
+mean(vfo_predict_nyc)
+
+pp_vfo_nyc <- mean(vfo_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("VFO")
+
+other_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Other"),type='response') 
+
+pp_other_nyc <- mean(other_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Other")
+
+burg_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Burglary"),type='response') 
+
+pp_burg_nyc <- mean(burg_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Burglary")
+
+contempt_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Criminal contempt"),type='response') 
+
+pp_contempt_nyc <- mean(contempt_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Criminal contempt")
+
+mischief_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Criminal mischief"),type='response') 
+
+pp_mischief_nyc <- mean(mischief_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Criminal mischief")
+
+
+dwi_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="DWI"),type='response') 
+
+pp_dwi_nyc <- mean(dwi_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DWI")
+
+felassault_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Felony assault"),type='response') 
+
+pp_felassault_nyc <- mean(felassault_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony assault")
+
+feldrug_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Felony drug"),type='response') 
+
+pp_feldrug_nyc <- mean(feldrug_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony drug")
+
+felweapon_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Felony weapon"),type='response') 
+
+pp_felweapon_nyc <- mean(felweapon_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony weapon")
+
+
+glarceny_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Grand larceny"),type='response') 
+
+pp_glarceny_nyc <- mean(glarceny_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Grand larceny")
+
+misdassault_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Misd assault"),type='response') 
+
+pp_misdassault_nyc <- mean(misdassault_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misd assault")
+
+misddrug_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Misd drug"),type='response') 
+
+pp_misddrug_nyc <- mean(misddrug_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misd drug")
+
+petit_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Petit larceny"),type='response') 
+
+pp_petit_nyc <- mean(petit_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Petit larceny")
+
+rob_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,charge_cat="Robbery"),type='response') 
+
+pp_rob_nyc <- mean(rob_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Robbery")
+
+
+nopend_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,any_pending="No"),type='response') 
+
+pp_nopend_nyc <- mean(nopend_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No pending")
+
+pend_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,any_pending="Yes"),type='response') 
+
+pp_pend_nyc <- mean(pend_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Has pending")
+
+misdconv0_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,misd_cat="0"),type='response') 
+
+pp_misdconv0_nyc <- mean(misdconv0_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No Misd Convictions")
+
+misdconv1_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,misd_cat="1"),type='response') 
+
+pp_misdconv1_nyc <- mean(misdconv1_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 Misd Conviction")
+
+misdconv2_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,misd_cat="2 to 4"),type='response') 
+
+pp_misdconv2_nyc <- mean(misdconv2_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2-4 Misd Convictions")
+
+misdconv5_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,misd_cat="5+"),type='response') 
+
+pp_misdconv5_nyc <- mean(misdconv5_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("5+ Misd Convictions")
+
+
+nvfconv0_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,nvf_cat="0"),type='response') 
+
+pp_nvfconv0_nyc <- mean(nvfconv0_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No NVF Convictions")
+
+nvfconv1_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,nvf_cat="1"),type='response') 
+
+pp_nvfconv1_nyc <- mean(nvfconv1_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 NVF Conviction")
+
+nvfconv2_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,nvf_cat="2+"),type='response') 
+
+pp_nvfconv2_nyc <- mean(nvfconv2_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2 NVF Convictions")
+
+
+vfoconv0_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,vfo_cat="0"),type='response') 
+
+pp_vfoconv0_nyc <- mean(vfoconv0_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No vfo Convictions")
+
+vfoconv1_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,vfo_cat="1"),type='response') 
+
+pp_vfoconv1_nyc <- mean(vfoconv1_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 vfo Conviction")
+
+vfoconv2_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,vfo_cat="2+"),type='response') 
+
+pp_vfoconv2_nyc <- mean(vfoconv2_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2 vfo Convictions")
+
+
+ROR_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,release_decision="ROR"),type='response') 
+
+pp_ROR_nyc <- mean(ROR_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("ROR")
+
+NMR_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,release_decision="Nonmonetary release"),type='response') 
+
+pp_NRM_nyc <- mean(NMR_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("NMR")
+
+nosup_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,supervision="No"),type='response') 
+
+pp_nosup_nyc <- mean(nosup_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No supervision")
+
+sup_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all,supervision="Yes"),type='response') 
+
+pp_sup_nyc <- mean(sup_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Supervision")
+
+nodv_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, DV="No"),type='response') 
+
+pp_nodv_nyc <- mean(nodv_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No DV")
+
+
+dv_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, DV="Yes"),type='response') 
+
+pp_dv_nyc <- mean(dv_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DV")
+
+DAT_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, DAT="Yes"),type='response') 
+
+pp_DAT_nyc <- mean(DAT_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DAT")
+
+NODAT_predict_nyc <- predict(mod_nyc, transform(mod_nyc_all, DAT="No"),type='response') 
+
+pp_NODAT_nyc <- mean(NODAT_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No DAT")
+
+
+white_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, race_ethnicity="White"),type='response') 
+
+pp_white_nyc <- mean(white_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("White")
+
+black_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, race_ethnicity="Black"),type='response') 
+
+pp_black_nyc <- mean(black_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Black")
+
+hispanic_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, race_ethnicity="Hispanic"),type='response') 
+
+pp_hispanic_nyc <- mean(hispanic_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Hispanic")
+
+othergroup_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, race_ethnicity="Additional Groups"),type='response') 
+
+pp_othergroup_nyc <- mean(othergroup_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Additional Groups")
+
+
+male_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, gender="Male"),type='response') 
+
+pp_male_nyc <- mean(male_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Male")
+
+male_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, gender="Male"),type='response') 
+
+pp_male_nyc <- mean(male_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Male")
+
+female_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, gender="Female"),type='response') 
+
+pp_female_nyc <- mean(female_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Female")
+
+age24_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, age_cat="<25"),type='response') 
+
+pp_age24_nyc <- mean(age24_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("<25")
+
+age25_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, age_cat="25-54"),type='response') 
+
+pp_age25_nyc <- mean(age25_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("25-54")
+
+
+age55_predict_nyc <- predict(mod_nyc,transform(mod_nyc_all, age_cat="55+"),type='response') 
+
+pp_age55_nyc <- mean(age55_predict_nyc) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("55+")
+
+
+nyc_pp_table <- bind_rows(pp_misd_nyc, pp_nvf_nyc, pp_vfo_nyc, pp_other_nyc, pp_burg_nyc, pp_contempt_nyc,  pp_dwi_nyc, pp_felassault_nyc, pp_feldrug_nyc, pp_felweapon_nyc, pp_glarceny_nyc, pp_misdassault_nyc, pp_misddrug_nyc, pp_mischief_nyc, pp_petit_nyc, pp_rob_nyc, pp_pend_nyc, pp_nopend_nyc, pp_misdconv0_nyc, pp_misdconv1_nyc, pp_misdconv2_nyc, pp_misdconv5_nyc, pp_nvfconv0_nyc, pp_nvfconv1_nyc, pp_nvfconv2_nyc, pp_vfoconv0_nyc, pp_vfoconv1_nyc, pp_vfoconv2_nyc, pp_ROR_nyc, pp_NRM_nyc, pp_nosup_nyc, pp_sup_nyc, pp_nodv_nyc, pp_dv_nyc, pp_DAT_nyc, pp_NODAT_nyc, pp_white_nyc, pp_black_nyc, pp_hispanic_nyc, pp_othergroup_nyc, pp_male_nyc, pp_female_nyc, pp_age24_nyc, pp_age25_nyc, pp_age55_nyc) %>% mutate(region = "NYC") %>% rownames_to_column(var = "predictor")
+
+
+
+
+```
+
+
+### NYC Suburb
+
+```{r}
+
+mod_suburb_all <- model_data_statewide %>%
+  filter(region == "NYC Suburb") 
+
+
+mod_suburb <- glm(formula = FTA ~ sev_cat + charge_cat + DV +  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision + app_released_cat, data = mod_suburb_all, family = binomial(link = "logit")) 
+
+psuedo_sub <- pR2(mod_suburb)
+
+#19%
+
+
+vif(mod_suburb)
+
+ame_sub <- margins(mod_suburb)
+
+results_sub <- data.frame(unclass(summary(ame_sub)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(region = "NYC Suburb") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+```
+
+```{r}
+
+# predicted probabilities for NYC Suburb
+
+sub_pp <- predict(mod_suburb, mod_suburb_all, type = "response")
+mean(sub_pp)
+#17%
+
+
+misd_predictsub <- predict(mod_suburb,transform(mod_suburb_all,sev_cat="Misdemeanor"),type='response') 
+
+pp_misdsub <- mean(misd_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misdemeanor")
+
+
+nvf_predictsub <- predict(mod_suburb,transform(mod_suburb_all,sev_cat="Nonviolent Felony"),type='response') 
+
+pp_nvfsub <- mean(nvf_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Nonviolent Felony")
+
+vfo_predictsub <- predict(mod_suburb,transform(mod_suburb_all,sev_cat="Violent Felony"),type='response') 
+mean(vfo_predictsub)
+
+pp_vfosub <- mean(vfo_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("VFO")
+
+other_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Other"),type='response') 
+
+pp_othersub <- mean(other_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Other")
+
+burg_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Burglary"),type='response') 
+
+pp_burgsub <- mean(burg_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Burglary")
+
+contempt_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Criminal contempt"),type='response') 
+
+pp_contemptsub <- mean(contempt_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Criminal contempt")
+
+mischief_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Criminal mischief"),type='response') 
+
+pp_mischiefsub <- mean(mischief_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Criminal mischief")
+
+
+dwi_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="DWI"),type='response') 
+
+pp_dwisub <- mean(dwi_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DWI")
+
+felassault_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Felony assault"),type='response') 
+
+pp_felassaultsub <- mean(felassault_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony assault")
+
+feldrug_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Felony drug"),type='response') 
+
+pp_feldrugsub <- mean(feldrug_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony drug")
+
+felweapon_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Felony weapon"),type='response') 
+
+pp_felweaponsub <- mean(felweapon_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony weapon")
+
+
+glarceny_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Grand larceny"),type='response') 
+
+pp_glarcenysub <- mean(glarceny_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Grand larceny")
+
+misdassault_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Misd assault"),type='response') 
+
+pp_misdassaultsub <- mean(misdassault_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misd assault")
+
+misddrug_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Misd drug"),type='response') 
+
+pp_misddrugsub <- mean(misddrug_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misd drug")
+
+petit_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Petit larceny"),type='response') 
+
+pp_petitsub <- mean(petit_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Petit larceny")
+
+rob_predictsub <- predict(mod_suburb,transform(mod_suburb_all,charge_cat="Robbery"),type='response') 
+
+pp_robsub <- mean(rob_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Robbery")
+
+
+nopend_predictsub <- predict(mod_suburb,transform(mod_suburb_all,any_pending="No"),type='response') 
+
+pp_nopendsub <- mean(nopend_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No pending")
+
+pend_predictsub <- predict(mod_suburb,transform(mod_suburb_all,any_pending="Yes"),type='response') 
+
+pp_pendsub <- mean(pend_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Has pending")
+
+misdconv0_predictsub <- predict(mod_suburb,transform(mod_suburb_all,misd_cat="0"),type='response') 
+
+pp_misdconv0sub <- mean(misdconv0_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No Misd Convictions")
+
+misdconv1_predictsub <- predict(mod_suburb,transform(mod_suburb_all,misd_cat="1"),type='response') 
+
+pp_misdconv1sub <- mean(misdconv1_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 Misd Conviction")
+
+misdconv2_predictsub <- predict(mod_suburb,transform(mod_suburb_all,misd_cat="2 to 4"),type='response') 
+
+pp_misdconv2sub <- mean(misdconv2_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2-4 Misd Convictions")
+
+misdconv5_predictsub <- predict(mod_suburb,transform(mod_suburb_all,misd_cat="5+"),type='response') 
+
+pp_misdconv5sub <- mean(misdconv5_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("5+ Misd Convictions")
+
+
+nvfconv0_predictsub <- predict(mod_suburb,transform(mod_suburb_all,nvf_cat="0"),type='response') 
+
+pp_nvfconv0sub <- mean(nvfconv0_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No NVF Convictions")
+
+nvfconv1_predictsub <- predict(mod_suburb,transform(mod_suburb_all,nvf_cat="1"),type='response') 
+
+pp_nvfconv1sub <- mean(nvfconv1_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 NVF Conviction")
+
+nvfconv2_predictsub <- predict(mod_suburb,transform(mod_suburb_all,nvf_cat="2+"),type='response') 
+
+pp_nvfconv2sub <- mean(nvfconv2_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2 NVF Convictions")
+
+
+vfoconv0_predictsub <- predict(mod_suburb,transform(mod_suburb_all,vfo_cat="0"),type='response') 
+
+pp_vfoconv0sub <- mean(vfoconv0_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No vfo Convictions")
+
+vfoconv1_predictsub <- predict(mod_suburb,transform(mod_suburb_all,vfo_cat="1"),type='response') 
+
+pp_vfoconv1sub <- mean(vfoconv1_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 vfo Conviction")
+
+vfoconv2_predictsub <- predict(mod_suburb,transform(mod_suburb_all,vfo_cat="2+"),type='response') 
+
+pp_vfoconv2sub <- mean(vfoconv2_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2 vfo Convictions")
+
+
+ROR_predictsub <- predict(mod_suburb,transform(mod_suburb_all,release_decision="ROR"),type='response') 
+
+pp_RORsub <- mean(ROR_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("ROR")
+
+NMR_predictsub <- predict(mod_suburb,transform(mod_suburb_all,release_decision="Nonmonetary release"),type='response') 
+
+pp_NRMsub <- mean(NMR_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("NMR")
+
+nosup_predictsub <- predict(mod_suburb,transform(mod_suburb_all,supervision="No"),type='response') 
+
+pp_nosupsub <- mean(nosup_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No supervision")
+
+sup_predictsub <- predict(mod_suburb,transform(mod_suburb_all,supervision="Yes"),type='response') 
+
+pp_supsub <- mean(sup_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Supervision")
+
+nodv_predictsub <- predict(mod_suburb,transform(mod_suburb_all, DV="No"),type='response') 
+
+pp_nodvsub <- mean(nodv_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No DV")
+
+
+dv_predictsub <- predict(mod_suburb,transform(mod_suburb_all, DV="Yes"),type='response') 
+
+pp_dvsub <- mean(dv_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DV")
+
+DAT_predictsub <- predict(mod_suburb,transform(mod_suburb_all, DAT="Yes"),type='response') 
+
+pp_DATsub <- mean(DAT_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DAT")
+
+NODAT_predictsub <- predict(mod_suburb,transform(mod_suburb_all, DAT="No"),type='response') 
+
+pp_NODATsub <- mean(NODAT_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No DAT")
+
+white_predictsub <- predict(mod_suburb,transform(mod_suburb_all, race_ethnicity="White"),type='response') 
+
+pp_whitesub <- mean(white_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("White")
+
+black_predictsub <- predict(mod_suburb,transform(mod_suburb_all, race_ethnicity="Black"),type='response') 
+
+pp_blacksub <- mean(black_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Black")
+
+hispanic_predictsub <- predict(mod_suburb,transform(mod_suburb_all, race_ethnicity="Hispanic"),type='response') 
+
+pp_hispanicsub <- mean(hispanic_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Hispanic")
+
+othergroup_predictsub <- predict(mod_suburb,transform(mod_suburb_all, race_ethnicity="Additional Groups"),type='response') 
+
+pp_othergroupsub <- mean(othergroup_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Additional Groups")
+
+
+male_predictsub <- predict(mod_suburb,transform(mod_suburb_all, gender="Male"),type='response') 
+
+pp_malesub <- mean(male_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Male")
+
+male_predictsub <- predict(mod_suburb,transform(mod_suburb_all, gender="Male"),type='response') 
+
+pp_malesub <- mean(male_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Male")
+
+female_predictsub <- predict(mod_suburb,transform(mod_suburb_all, gender="Female"),type='response') 
+
+pp_femalesub <- mean(female_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Female")
+
+age24_predictsub <- predict(mod_suburb,transform(mod_suburb_all, age_cat="<25"),type='response') 
+
+pp_age24sub <- mean(age24_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("<25")
+
+age25_predictsub <- predict(mod_suburb,transform(mod_suburb_all, age_cat="25-54"),type='response') 
+
+pp_age25sub <- mean(age25_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("25-54")
+
+
+age55_predictsub <- predict(mod_suburb,transform(mod_suburb_all, age_cat="55+"),type='response') 
+
+pp_age55sub <- mean(age55_predictsub) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("55+")
+
+
+sub_pp_table <- bind_rows(pp_misdsub, pp_nvfsub, pp_vfosub, pp_othersub, pp_burgsub, pp_contemptsub,  pp_dwisub, pp_felassaultsub, pp_feldrugsub, pp_felweaponsub, pp_glarcenysub, pp_misdassaultsub, pp_misddrugsub, pp_mischiefsub, pp_petitsub, pp_robsub, pp_pendsub, pp_nopendsub, pp_misdconv0sub, pp_misdconv1sub, pp_misdconv2sub, pp_misdconv5sub, pp_nvfconv0sub, pp_nvfconv1sub, pp_nvfconv2sub, pp_vfoconv0sub, pp_vfoconv1sub, pp_vfoconv2sub, pp_RORsub, pp_NRMsub, pp_nosupsub, pp_supsub, pp_nodvsub, pp_dvsub, pp_DATsub, pp_NODATsub, pp_whitesub, pp_blacksub, pp_hispanicsub, pp_othergroupsub, pp_malesub, pp_femalesub, pp_age24sub, pp_age25sub, pp_age55sub) %>% mutate(region = "NYC Suburb") %>% rownames_to_column(var = "predictor")
+
+
+```
+
+### Upstate
+
+
+```{r}
+
+mod_upstate_all <- model_data_statewide %>%
+  filter(region == "Upstate") 
+
+
+mod_upstate <- glm(formula = FTA ~ sev_cat + charge_cat + DV + any_pending + misd_cat + nvf_cat + vfo_cat + supervision + race_ethnicity + gender + age_cat + DAT + release_decision + app_released_cat, data = mod_upstate_all, family = binomial(link = "logit")) 
+
+psuedo_upstate <- pR2(mod_upstate)
+# 19%
+
+
+vif(mod_upstate)
+
+ame_upstate <- margins(mod_upstate)
+
+results_upstate <- data.frame(unclass(summary(ame_upstate)), check.names = FALSE) %>% select(factor, AME, p) %>% mutate(region = "Upstate") %>% mutate(AME = round(AME,3)) %>% mutate(AME = paste0(AME * 100, "%")) %>% mutate(p = round(p,3))
+
+```
+
+
+```{r}
+
+# predicted probabilities for Upstate
+
+upstate_pp <- predict(mod_upstate, mod_upstate_all, type = "response")
+mean(upstate_pp)
+#.21
+
+
+misd_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,sev_cat="Misdemeanor"),type='response') 
+
+pp_misd_upstate <- mean(misd_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misdemeanor")
+
+
+nvf_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,sev_cat="Nonviolent Felony"),type='response') 
+
+pp_nvf_upstate <- mean(nvf_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Nonviolent Felony")
+
+vfo_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,sev_cat="Violent Felony"),type='response') 
+mean(vfo_predict_upstate)
+
+pp_vfo_upstate <- mean(vfo_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("VFO")
+
+other_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Other"),type='response') 
+
+pp_other_upstate <- mean(other_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Other")
+
+burg_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Burglary"),type='response') 
+
+pp_burg_upstate <- mean(burg_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Burglary")
+
+contempt_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Criminal contempt"),type='response') 
+
+pp_contempt_upstate <- mean(contempt_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Criminal contempt")
+
+mischief_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Criminal mischief"),type='response') 
+
+pp_mischief_upstate <- mean(mischief_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Criminal mischief")
+
+
+dwi_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="DWI"),type='response') 
+
+pp_dwi_upstate <- mean(dwi_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DWI")
+
+felassault_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Felony assault"),type='response') 
+
+pp_felassault_upstate <- mean(felassault_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony assault")
+
+feldrug_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Felony drug"),type='response') 
+
+pp_feldrug_upstate <- mean(feldrug_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony drug")
+
+felweapon_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Felony weapon"),type='response') 
+
+pp_felweapon_upstate <- mean(felweapon_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Felony weapon")
+
+
+glarceny_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Grand larceny"),type='response') 
+
+pp_glarceny_upstate <- mean(glarceny_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Grand larceny")
+
+misdassault_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Misd assault"),type='response') 
+
+pp_misdassault_upstate <- mean(misdassault_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misd assault")
+
+misddrug_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Misd drug"),type='response') 
+
+pp_misddrug_upstate <- mean(misddrug_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Misd drug")
+
+petit_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Petit larceny"),type='response') 
+
+pp_petit_upstate <- mean(petit_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Petit larceny")
+
+rob_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,charge_cat="Robbery"),type='response') 
+
+pp_rob_upstate <- mean(rob_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Robbery")
+
+
+nopend_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,any_pending="No"),type='response') 
+
+pp_nopend_upstate <- mean(nopend_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No pending")
+
+pend_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,any_pending="Yes"),type='response') 
+
+pp_pend_upstate <- mean(pend_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Has pending")
+
+misdconv0_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,misd_cat="0"),type='response') 
+
+pp_misdconv0_upstate <- mean(misdconv0_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No Misd Convictions")
+
+misdconv1_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,misd_cat="1"),type='response') 
+
+pp_misdconv1_upstate <- mean(misdconv1_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 Misd Conviction")
+
+misdconv2_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,misd_cat="2 to 4"),type='response') 
+
+pp_misdconv2_upstate <- mean(misdconv2_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2-4 Misd Convictions")
+
+misdconv5_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,misd_cat="5+"),type='response') 
+
+pp_misdconv5_upstate <- mean(misdconv5_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("5+ Misd Convictions")
+
+
+nvfconv0_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,nvf_cat="0"),type='response') 
+
+pp_nvfconv0_upstate <- mean(nvfconv0_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No NVF Convictions")
+
+nvfconv1_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,nvf_cat="1"),type='response') 
+
+pp_nvfconv1_upstate <- mean(nvfconv1_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 NVF Conviction")
+
+nvfconv2_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,nvf_cat="2+"),type='response') 
+
+pp_nvfconv2_upstate <- mean(nvfconv2_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2 NVF Convictions")
+
+
+vfoconv0_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,vfo_cat="0"),type='response') 
+
+pp_vfoconv0_upstate <- mean(vfoconv0_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No vfo Convictions")
+
+vfoconv1_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,vfo_cat="1"),type='response') 
+
+pp_vfoconv1_upstate <- mean(vfoconv1_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("1 vfo Conviction")
+
+vfoconv2_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,vfo_cat="2+"),type='response') 
+
+pp_vfoconv2_upstate <- mean(vfoconv2_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("2 vfo Convictions")
+
+
+ROR_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,release_decision="ROR"),type='response') 
+
+pp_ROR_upstate <- mean(ROR_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("ROR")
+
+NMR_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,release_decision="Nonmonetary release"),type='response') 
+
+pp_NRM_upstate <- mean(NMR_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("NMR")
+
+nosup_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,supervision="No"),type='response') 
+
+pp_nosup_upstate <- mean(nosup_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No supervision")
+
+sup_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all,supervision="Yes"),type='response') 
+
+pp_sup_upstate <- mean(sup_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Supervision")
+
+nodv_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, DV="No"),type='response') 
+
+pp_nodv_upstate <- mean(nodv_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No DV")
+
+
+dv_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, DV="Yes"),type='response') 
+
+pp_dv_upstate <- mean(dv_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DV")
+
+DAT_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, DAT="Yes"),type='response') 
+
+pp_DAT_upstate <- mean(DAT_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("DAT")
+
+NODAT_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, DAT="No"),type='response') 
+
+pp_NODAT_upstate <- mean(NODAT_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("No DAT")
+
+
+white_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, race_ethnicity="White"),type='response') 
+
+pp_white_upstate <- mean(white_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("White")
+
+black_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, race_ethnicity="Black"),type='response') 
+
+pp_black_upstate <- mean(black_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Black")
+
+hispanic_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, race_ethnicity="Hispanic"),type='response') 
+
+pp_hispanic_upstate <- mean(hispanic_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Hispanic")
+
+othergroup_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, race_ethnicity="Additional Groups"),type='response') 
+
+pp_othergroup_upstate <- mean(othergroup_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Additional Groups")
+
+
+male_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, gender="Male"),type='response') 
+
+pp_male_upstate <- mean(male_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Male")
+
+male_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, gender="Male"),type='response') 
+
+pp_male_upstate <- mean(male_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Male")
+
+female_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, gender="Female"),type='response') 
+
+pp_female_upstate <- mean(female_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("Female")
+
+age24_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, age_cat="<25"),type='response') 
+
+pp_age24_upstate <- mean(age24_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("<25")
+
+age25_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, age_cat="25-54"),type='response') 
+
+pp_age25_upstate <- mean(age25_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("25-54")
+
+
+age55_predict_upstate <- predict(mod_upstate,transform(mod_upstate_all, age_cat="55+"),type='response') 
+
+pp_age55_upstate <- mean(age55_predict_upstate) %>%
+  data.frame(predicted = .) %>%
+  `rownames<-`("55+")
+
+
+upstate_pp_table <- bind_rows(pp_misd_upstate, pp_nvf_upstate, pp_vfo_upstate, pp_other_upstate, pp_burg_upstate, pp_contempt_upstate,  pp_dwi_upstate, pp_felassault_upstate, pp_feldrug_upstate, pp_felweapon_upstate, pp_glarceny_upstate, pp_misdassault_upstate, pp_misddrug_upstate, pp_mischief_upstate, pp_petit_upstate, pp_rob_upstate, pp_pend_upstate, pp_nopend_upstate, pp_misdconv0_upstate, pp_misdconv1_upstate, pp_misdconv2_upstate, pp_misdconv5_upstate, pp_nvfconv0_upstate, pp_nvfconv1_upstate, pp_nvfconv2_upstate, pp_vfoconv0_upstate, pp_vfoconv1_upstate, pp_vfoconv2_upstate, pp_ROR_upstate, pp_NRM_upstate, pp_nosup_upstate, pp_sup_upstate, pp_nodv_upstate, pp_dv_upstate, pp_DAT_upstate, pp_NODAT_upstate, pp_white_upstate, pp_black_upstate, pp_hispanic_upstate, pp_othergroup_upstate, pp_male_upstate, pp_female_upstate, pp_age24_upstate, pp_age25_upstate, pp_age55_upstate) %>% mutate(region = "Upstate") %>% rownames_to_column(var = "predictor")
+
+
+
+
+```
+
+
+```{r}
+
+# bind AMEs
+
+findings <- bind_rows(results_all, results_nyc, results_sub, results_upstate) %>% 
+   pivot_wider(names_from = region, values_from = c(AME, p)) %>% 
+  select(factor, AME_NYC, p_NYC, `AME_NYC Suburb`, `p_NYC Suburb`, AME_Upstate, p_Upstate, AME_Statewide, p_Statewide)
+
+
+setwd("C:/R Projects/OCA_fta")
+findings %>% 
+   write.csv(., file = "AMEs.csv")
+
+
+```
+
+
+```{r}
+
+# bind predicted probabilities
+
+setwd("C:/R Projects/OCA_fta")
+full_pp_table <- bind_rows(statewide_pp_table, nyc_pp_table, sub_pp_table, upstate_pp_table) %>%
+  pivot_wider(names_from = "region", values_from = "predicted") %>% 
+  select("predictor", "NYC", "NYC Suburb", "Upstate", "Statewide") %>% 
+  write.csv(.,"pp_table.csv", row.names = FALSE)
+
+```
+
+
+
