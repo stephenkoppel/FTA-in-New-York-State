@@ -1,0 +1,627 @@
+---
+title: "out of sample"
+author: "Stephen Koppel"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+# create object for imputing overall rate
+
+impute_all <- FTA_arraign %>% # refer back to Section 4 syntax to create FTA_arraign object
+  mutate(any_pending = ifelse(pend_misd == 1|pend_nvf == 1|pend_vfo ==1, "Yes","No")) %>% 
+  
+  mutate(misd_cat = case_when(count_prior_misd == 0 ~ "0",
+                              count_prior_misd == 1 ~ "1",
+                              count_prior_misd %in% c(2,3,4) ~ "2 to 4",
+                              count_prior_misd %in% c(5,6,7,8,9,10) ~ "5+")) %>% 
+  
+  mutate(nvf_cat = case_when(count_prior_nvf == 0 ~ "0",
+                             count_prior_nvf == 1 ~ "1",
+                             count_prior_nvf %in% c(2,3,4) ~ "2+")) %>% 
+  mutate(vfo_cat = case_when(count_prior_vfo == 0 ~ "0",
+                             count_prior_vfo == 1 ~ "1",
+                             count_prior_vfo == 2 ~ "2+")) %>% 
+  mutate(supervision = case_when(supervision == "1" ~ "Yes",
+                                     supervision == "0" ~ "No")) %>% 
+  transmute(FTA, sev_cat, charge_cat, region, any_pending, misd_cat, nvf_cat, vfo_cat, supervision) %>% 
+  na.omit()
+ 
+
+```
+
+
+```{r}
+
+
+# create held dataset
+
+model_held_data <- FTA_arraign %>% 
+  mutate(held = ifelse(arraign_outcome %in% c("Bail-set", "Remanded"), "Held", "Released")) %>%
+  filter(held == "Held") %>% 
+  mutate(any_pending = ifelse(pend_misd == 1|pend_nvf == 1|pend_vfo ==1, "Yes","No")) %>% 
+  
+  mutate(misd_cat = case_when(count_prior_misd == 0 ~ "0",
+                              count_prior_misd == 1 ~ "1",
+                              count_prior_misd %in% c(2,3,4) ~ "2 to 4",
+                              count_prior_misd %in% c(5,6,7,8,9,10) ~ "5+")) %>% 
+  
+  mutate(nvf_cat = case_when(count_prior_nvf == 0 ~ "0",
+                             count_prior_nvf == 1 ~ "1",
+                             count_prior_nvf %in% c(2,3,4) ~ "2+")) %>% 
+  mutate(vfo_cat = case_when(count_prior_vfo == 0 ~ "0",
+                             count_prior_vfo == 1 ~ "1",
+                             count_prior_vfo == 2 ~ "2+")) %>% 
+  mutate(supervision = case_when(supervision == "1" ~ "Yes",
+                                     supervision == "0" ~ "No")) %>% 
+  transmute(sev_cat, charge_cat, region, any_pending, misd_cat, nvf_cat, vfo_cat, supervision) %>% 
+  na.omit()
+
+
+
+
+```
+
+
+
+# statewide
+
+```{r}
+
+
+mod_all_sev <- glm(formula = FTA ~  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + charge_cat + sev_cat, data = model_data_statewide, family = binomial(link = "logit"))
+
+est_in <- predict(mod_all_sev, model_data_statewide, type = "response")
+mean(est_in)
+
+# in sample: 17%
+
+# out of sample
+
+est_out <- predict(mod_all_sev, model_held_data, type = "response")
+mean(est_out)
+
+# 21%
+
+est_all <- predict(mod_all_sev, impute_all, type = "response")
+mean(est_all)
+
+# 18%
+
+roc_state_in <- roc(model_data_statewide$FTA,predict(mod_all_sev, model_data_statewide, type = "response"))
+
+# roc = .75
+
+
+```
+
+
+```{r}
+
+mod_data_misd <- model_data_statewide %>% filter(sev_cat == "Misdemeanor")
+
+mod_impute_misd <- model_held_data %>% filter(sev_cat == "Misdemeanor")
+
+mod_impute_misd_all <- impute_all %>% filter(sev_cat == "Misdemeanor")
+
+
+
+misd_in <- predict(mod_all_sev, mod_data_misd, type = "response")
+mean(misd_in)
+
+# in sample misdemeanor: 16%
+
+# out of sample
+
+misd_out <- predict(mod_all_sev, mod_impute_misd, type = "response")
+mean(misd_out)
+
+# 27%
+
+misd_impute_all <- predict(mod_all_sev, mod_impute_misd_all, type = "response")
+mean(misd_impute_all)
+
+# 17%
+
+roc_misd_in <- roc(mod_data_misd$FTA,predict(mod_all_sev, mod_data_misd, type = "response"))
+
+# roc = .76
+
+
+```
+
+
+```{r}
+
+mod_data_nvf <- model_data_statewide %>% filter(sev_cat == "Nonviolent Felony")
+
+mod_impute_nvf <- model_held_data %>% filter(sev_cat == "Nonviolent Felony")
+
+mod_impute_nvf_all <- impute_all %>% filter(sev_cat == "Nonviolent Felony")
+
+
+
+overall_in_nvf <- predict(mod_all_sev, mod_data_nvf, type = "response")
+mean(overall_in_nvf)
+
+# in sample nvf: 20%
+
+# out of sample
+
+overall_out_nvf <- predict(mod_all_sev, mod_impute_nvf, type = "response")
+mean(overall_out_nvf)
+
+# 26%
+
+impute_nvf_all <- predict(mod_all_sev, mod_impute_nvf_all, type = "response")
+mean(impute_nvf_all)
+
+# 22%
+
+roc_nvf_in <- roc(mod_data_nvf$FTA,predict(mod_all_sev, mod_data_nvf, type = "response"))
+
+# roc = .71
+
+```
+
+```{r}
+
+mod_data_vfo <- model_data_statewide %>% filter(sev_cat == "Violent Felony")
+
+mod_impute_vfo <- model_held_data %>% filter(sev_cat == "Violent Felony")
+
+mod_impute_vfo_all <- impute_all %>% filter(sev_cat == "Violent Felony")
+
+
+overall_in_vfo <- predict(mod_all_sev, mod_data_vfo, type = "response")
+mean(overall_in_vfo)
+
+# in sample vfo: 14%
+
+# out of sample
+
+overall_out_vfo <- predict(mod_all_sev, mod_impute_vfo, type = "response")
+mean(overall_out_vfo)
+
+# 16%
+
+impute_vfo_all <- predict(mod_all_sev, mod_impute_vfo_all, type = "response")
+mean(impute_vfo_all)
+
+# 15%
+
+
+roc_vfo_in <- roc(mod_data_vfo$FTA,predict(mod_all_sev, mod_data_vfo, type = "response"))
+
+# roc = .70
+
+```
+
+## nyc 
+
+```{r}
+
+
+pars_data_nyc <- model_data_statewide %>% filter(region == "NYC")
+
+pars_data_nyc_held <- model_held_data %>% filter(region == "NYC")
+
+impute_all_nyc <- impute_all %>% filter(region == "NYC")
+
+
+mod_all_sev_nyc <- glm(formula = FTA ~  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + charge_cat + sev_cat, data = pars_data_nyc, family = binomial(link = "logit"))
+
+est_in_nyc <- predict(mod_all_sev_nyc, pars_data_nyc, type = "response")
+mean(est_in_nyc)
+
+# in sample misdemeanor: 16%
+
+# out of sample
+
+est_out_nyc <- predict(mod_all_sev_nyc, pars_data_nyc_held, type = "response")
+mean(est_out_nyc)
+
+# 22%
+
+est_nyc_all <- predict(mod_all_sev_nyc, impute_all_nyc, type = "response")
+mean(est_nyc_all)
+
+#17%
+
+roc_misd_in_nyc <- roc(pars_data_nyc$FTA,predict(mod_all_sev_nyc, pars_data_nyc, type = "response"))
+
+# roc = .76
+
+
+```
+
+
+```{r}
+
+
+pars_data_nyc_misd <- model_data_statewide %>% filter(region == "NYC", sev_cat == "Misdemeanor")
+
+pars_data_nyc_misd_held <- model_held_data %>% filter(region == "NYC", sev_cat == "Misdemeanor")
+
+impute_nyc_misd <- impute_all %>% filter(region == "NYC", sev_cat == "Misdemeanor")
+
+
+est_in_nyc_misd <- predict(mod_all_sev_nyc, pars_data_nyc_misd, type = "response")
+mean(est_in_nyc_misd)
+
+# in sample misdemeanor: 15%
+
+# out of sample
+
+est_out_nyc_misd <- predict(mod_all_sev_nyc, pars_data_nyc_misd_held, type = "response")
+mean(est_out_nyc_misd)
+
+# 30%
+
+est_all_nyc_misd <- predict(mod_all_sev_nyc, impute_nyc_misd, type = "response")
+mean(est_all_nyc_misd)
+
+#15%
+
+
+roc_misd_in_nyc <- roc(pars_data_nyc_misd$FTA,predict(mod_all_sev_nyc, pars_data_nyc_misd, type = "response"))
+
+# roc = .77
+
+
+```
+
+```{r}
+
+pars_data_nyc_nvf <- model_data_statewide %>% filter(region == "NYC", sev_cat == "Nonviolent Felony")
+
+pars_data_nyc_nvf_held <- model_held_data %>% filter(region == "NYC", sev_cat == "Nonviolent Felony")
+
+impute_nyc_nvf <- impute_all %>% filter(region == "NYC", sev_cat == "Nonviolent Felony")
+
+
+est_in_nyc_nvf <- predict(mod_all_sev_nyc, pars_data_nyc_nvf, type = "response")
+mean(est_in_nyc_nvf)
+
+# in sample nvf: 22%
+
+# out of sample
+
+est_out_nyc_nvf <- predict(mod_all_sev_nyc, pars_data_nyc_nvf_held, type = "response")
+mean(est_out_nyc_nvf)
+
+# 30%
+
+est_all_nyc_nvf <- predict(mod_all_sev_nyc, impute_nyc_nvf, type = "response")
+mean(est_all_nyc_nvf)
+
+#24%
+
+roc_nvf_in_nyc <- roc(pars_data_nyc_nvf$FTA,predict(mod_all_sev_nyc, pars_data_nyc_nvf, type = "response"))
+
+# roc = .73
+
+```
+
+```{r}
+
+pars_data_nyc_vfo <- model_data_statewide %>% filter(region == "NYC", sev_cat == "Violent Felony")
+
+pars_data_nyc_vfo_held <- model_held_data %>% filter(region == "NYC", sev_cat == "Violent Felony")
+
+impute_nyc_vfo <- impute_all %>% filter(region == "NYC", sev_cat == "Violent Felony")
+
+
+est_in_nyc_vfo <- predict(mod_all_sev_nyc, pars_data_nyc_vfo, type = "response")
+mean(est_in_nyc_vfo)
+
+# in sample vfo: 14%
+
+# out of sample
+
+est_out_nyc_vfo <- predict(mod_all_sev_nyc, pars_data_nyc_vfo_held, type = "response")
+mean(est_out_nyc_vfo)
+
+# 18%
+
+est_all_nyc_vfo <- predict(mod_all_sev_nyc, impute_nyc_vfo, type = "response")
+mean(est_all_nyc_vfo)
+
+#16%
+
+roc_vfo_in_nyc <- roc(pars_data_nyc_vfo$FTA,predict(mod_all_sev_nyc, pars_data_nyc_vfo, type = "response"))
+
+# roc = .71
+
+```
+
+## nyc suburb 
+
+```{r}
+
+
+pars_data_sub <- model_data_statewide %>% filter(region == "NYC Suburb")
+
+pars_data_sub_held <- model_held_data %>% filter(region == "NYC Suburb")
+
+impute_all_sub <- impute_all %>% filter(region == "NYC Suburb")
+
+
+mod_all_sev_sub <- glm(formula = FTA ~  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + charge_cat + sev_cat, data = pars_data_sub, family = binomial(link = "logit"))
+
+est_in_sub <- predict(mod_all_sev_sub, pars_data_sub, type = "response")
+mean(est_in_sub)
+
+# in sample misdemeanor: 17%
+
+# out of sample
+
+est_out_sub <- predict(mod_all_sev_sub, pars_data_sub_held, type = "response")
+mean(est_out_sub)
+
+
+# 19%
+
+est_all_sub <- predict(mod_all_sev_sub, impute_all_sub, type = "response")
+mean(est_all_sub)
+
+#17%
+
+roc_misd_in_sub <- roc(pars_data_sub$FTA,predict(mod_all_sev_sub, pars_data_sub, type = "response"))
+
+# roc = .75
+
+
+```
+
+
+```{r}
+
+
+pars_data_sub_misd <- model_data_statewide %>% filter(region == "NYC Suburb", sev_cat == "Misdemeanor")
+
+pars_data_sub_misd_held <- model_held_data %>% filter(region == "NYC Suburb", sev_cat == "Misdemeanor")
+
+impute_sub_misd <- impute_all %>% filter(region == "NYC Suburb", sev_cat == "Misdemeanor")
+
+
+
+est_in_sub_misd <- predict(mod_all_sev_sub, pars_data_sub_misd, type = "response")
+mean(est_in_sub_misd)
+
+# in sample misdemeanor: 18%
+
+# out of sample
+
+est_out_sub_misd <- predict(mod_all_sev_sub, pars_data_sub_misd_held, type = "response")
+mean(est_out_sub_misd)
+
+# 26%
+
+est_all_sub_misd <- predict(mod_all_sev_sub, impute_sub_misd, type = "response")
+mean(est_all_sub_misd)
+
+#18%
+
+roc_misd_in_sub <- roc(pars_data_sub_misd$FTA,predict(mod_all_sev_sub, pars_data_sub_misd, type = "response"))
+
+# roc = .76
+
+
+```
+
+
+```{r}
+
+pars_data_sub_nvf <- model_data_statewide %>% filter(region == "NYC Suburb", sev_cat == "Nonviolent Felony")
+
+pars_data_sub_nvf_held <- model_held_data %>% filter(region == "NYC Suburb", sev_cat == "Nonviolent Felony")
+
+impute_sub_nvf <- impute_all %>% filter(region == "NYC Suburb", sev_cat == "Nonviolent Felony")
+
+
+est_in_sub_nvf <- predict(mod_all_sev_sub, pars_data_sub_nvf, type = "response")
+mean(est_in_sub_nvf)
+
+# in sample misdemeanor: 16%
+
+# out of sample
+
+est_out_sub_nvf <- predict(mod_all_sev_sub, pars_data_sub_nvf_held, type = "response")
+mean(est_out_sub_nvf)
+
+# 24%
+
+est_all_sub_nvf <- predict(mod_all_sev_sub, impute_sub_nvf, type = "response")
+mean(est_all_sub_nvf)
+
+#18%
+
+roc_nvf_in_sub <- roc(pars_data_sub_nvf$FTA,predict(mod_all_sev_sub, pars_data_sub_nvf, type = "response"))
+
+# roc = .71
+
+```
+
+
+```{r}
+
+pars_data_sub_vfo <- model_data_statewide %>% filter(region == "NYC Suburb", sev_cat == "Violent Felony")
+
+pars_data_sub_vfo_held <- model_held_data %>% filter(region == "NYC Suburb", sev_cat == "Violent Felony")
+
+impute_sub_vfo <- impute_all %>% filter(region == "NYC Suburb", sev_cat == "Violent Felony")
+
+
+
+est_in_sub_vfo <- predict(mod_all_sev_sub, pars_data_sub_vfo, type = "response")
+mean(est_in_sub_vfo)
+
+# in sample misdemeanor: 9%
+
+# out of sample
+
+est_out_sub_vfo <- predict(mod_all_sev_sub, pars_data_sub_vfo_held, type = "response")
+mean(est_out_sub_vfo)
+
+# 12%
+
+est_all_sub_vfo <- predict(mod_all_sev_sub, impute_sub_vfo, type = "response")
+mean(est_all_sub_vfo)
+
+#11%
+
+roc_vfo_in_sub <- roc(pars_data_sub_vfo$FTA,predict(mod_all_sev_sub, pars_data_sub_vfo, type = "response"))
+
+# roc = .69
+
+```
+
+## upstate
+
+```{r}
+
+
+pars_data_up <- model_data_statewide %>% filter(region == "Upstate")
+
+pars_data_up_held <- model_held_data %>% filter(region == "Upstate")
+
+impute_upstate <- impute_all %>% filter(region == "Upstate")
+
+
+mod_all_sev_up <- glm(formula = FTA ~  any_pending + misd_cat + nvf_cat + vfo_cat + supervision + charge_cat + sev_cat, data = pars_data_up, family = binomial(link = "logit"))
+
+est_in_up <- predict(mod_all_sev_up, pars_data_up, type = "response")
+mean(est_in_up)
+
+# in sample misdemeanor: 21%
+
+# out of sample
+
+est_out_up <- predict(mod_all_sev_up, pars_data_up_held, type = "response")
+mean(est_out_up)
+
+# 21%
+
+est_all_up <- predict(mod_all_sev_up, impute_upstate, type = "response")
+mean(est_all_up)
+
+#21%
+
+roc_misd_in_up <- roc(pars_data_up$FTA,predict(mod_all_sev_up, pars_data_up, type = "response"))
+
+# roc = .71
+
+
+```
+
+
+```{r}
+
+
+pars_data_up_misd <- model_data_statewide %>% filter(region == "Upstate", sev_cat == "Misdemeanor")
+
+pars_data_up_misd_held <- model_held_data %>% filter(region == "Upstate", sev_cat == "Misdemeanor")
+
+impute_upstate_misd <- impute_all %>% filter(region == "Upstate", sev_cat == "Misdemeanor")
+
+
+est_in_up_misd <- predict(mod_all_sev_up, pars_data_up_misd, type = "response")
+mean(est_in_up_misd)
+
+# in sample misdemeanor: 22%
+
+# out of sample
+
+est_out_up_misd <- predict(mod_all_sev_up, pars_data_up_misd_held, type = "response")
+mean(est_out_up_misd)
+
+# 27%
+
+est_up_misd <- predict(mod_all_sev_up, impute_upstate_misd, type = "response")
+mean(est_up_misd)
+
+#23%
+
+roc_misd_in_up <- roc(pars_data_up_misd$FTA,predict(mod_all_sev_up, pars_data_up_misd, type = "response"))
+
+# roc = .72
+
+
+```
+
+
+```{r}
+
+pars_data_up_nvf <- model_data_statewide %>% filter(region == "Upstate", sev_cat == "Nonviolent Felony")
+
+pars_data_up_nvf_held <- model_held_data %>% filter(region == "Upstate", sev_cat == "Nonviolent Felony")
+
+impute_upstate_nvf <- impute_all %>% filter(region == "Upstate", sev_cat == "Nonviolent Felony")
+
+
+
+est_in_up_nvf <- predict(mod_all_sev_up, pars_data_up_nvf, type = "response")
+mean(est_in_up_nvf)
+
+# in sample misdemeanor: 20%
+
+# out of sample
+
+est_out_up_nvf <- predict(mod_all_sev_up, pars_data_up_nvf_held, type = "response")
+mean(est_out_up_nvf)
+
+# 24%
+
+est_up_nvf <- predict(mod_all_sev_up, impute_upstate_nvf, type = "response")
+mean(est_up_nvf)
+
+#22%
+
+roc_nvf_in_up <- roc(pars_data_up_nvf$FTA,predict(mod_all_sev_up, pars_data_up_nvf, type = "response"))
+
+# roc = .67
+
+```
+
+
+```{r}
+
+pars_data_up_vfo <- model_data_statewide %>% filter(region == "Upstate", sev_cat == "Violent Felony")
+
+pars_data_up_vfo_held <- model_held_data %>% filter(region == "Upstate", sev_cat == "Violent Felony")
+
+impute_upstate_vfo <- impute_all %>% filter(region == "Upstate", sev_cat == "Violent Felony")
+
+
+
+est_in_up_vfo <- predict(mod_all_sev_up, pars_data_up_vfo, type = "response")
+mean(est_in_up_vfo)
+
+# in sample misdemeanor: 12%
+
+# out of sample
+
+est_out_up_vfo <- predict(mod_all_sev_up, pars_data_up_vfo_held, type = "response")
+mean(est_out_up_vfo)
+
+# 14%
+
+est_up_vfo <- predict(mod_all_sev_up, impute_upstate_vfo, type = "response")
+mean(est_up_vfo)
+
+#14%
+
+roc_vfo_in_up <- roc(pars_data_up_vfo$FTA,predict(mod_all_sev_up, pars_data_up_vfo, type = "response"))
+
+# roc = .68
+
+```
+
+
+
